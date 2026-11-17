@@ -7,10 +7,13 @@ import { ActiveCall } from './components/ActiveCall';
 
 export function App() {
   const [serverUrl, setServerUrl] = useState(() => {
+    const saved = localStorage.getItem('groupcall_server_url');
+    if (saved && !saved.includes('localhost') && !saved.includes('127.0.0.1')) {
+      return saved;
+    }
     return (
-      localStorage.getItem('groupcall_server_url') ||
       import.meta.env.VITE_SIGNALING_URL ||
-      'http://localhost:4000'
+      'https://tech.techugo.com:1065'
     );
   });
 
