@@ -126,3 +126,4 @@ export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
     </div>
   );
 };
+

@@ -27,3 +27,4 @@ export const colors = {
   avatarBg: '#E0E7FF',      // Indigo 100
   avatarText: '#4338CA',    // Indigo 700
 };
+

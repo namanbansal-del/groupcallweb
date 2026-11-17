@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CallMode, GroupCallState, Participant } from '../types';
 
-const ICE_SERVERS: RTCConfiguration = {
+const FALLBACK_ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
@@ -28,9 +28,11 @@ const SAMPLE_NAMES = [
 export function useWebGroupCall({
   socket,
   currentUser,
+  serverUrl,
 }: {
   socket: any;
   currentUser: { id: string; name: string; avatar?: string };
+  serverUrl?: string;
 }) {
   const initialLocal: Participant = {
     id: currentUser.id,
@@ -61,6 +63,7 @@ export function useWebGroupCall({
   });
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [iceConfig, setIceConfig] = useState<RTCConfiguration>(FALLBACK_ICE_SERVERS);
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -75,6 +78,28 @@ export function useWebGroupCall({
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  // ── Fetch ICE Config from REST Endpoint (/api/webrtc/config) ─────
+  useEffect(() => {
+    let active = true;
+    async function fetchIce() {
+      if (!serverUrl) return;
+      try {
+        const res = await fetch(`${serverUrl}/api/webrtc/config`);
+        const data = await res.json();
+        if (active && data?.iceServers && Array.isArray(data.iceServers)) {
+          console.log('[Web ICE Config] Loaded', data.iceServers.length, 'servers from backend');
+          setIceConfig({ iceServers: data.iceServers });
+        }
+      } catch (err) {
+        console.warn('[Web ICE Config] Using fallback Google STUN');
+      }
+    }
+    fetchIce();
+    return () => {
+      active = false;
+    };
+  }, [serverUrl]);
 
   const setupAudioDetection = useCallback((stream: MediaStream) => {
     try {
@@ -124,15 +149,15 @@ export function useWebGroupCall({
     }
   }, []);
 
-  // ── Create Peer Connection for a Remote User ─────────────────────
+  // ── Create Peer Connection for a Remote Peer (socketId) ───────────
   const createPeer = useCallback(
-    async (remoteUserId: string, isInitiator: boolean) => {
-      if (peersRef.current.has(remoteUserId)) {
-        return peersRef.current.get(remoteUserId)!;
+    async (remoteSocketId: string, _remoteUserName?: string, isInitiator: boolean = false) => {
+      if (peersRef.current.has(remoteSocketId)) {
+        return peersRef.current.get(remoteSocketId)!;
       }
 
-      const pc = new RTCPeerConnection(ICE_SERVERS);
-      peersRef.current.set(remoteUserId, pc);
+      const pc = new RTCPeerConnection(iceConfig);
+      peersRef.current.set(remoteSocketId, pc);
 
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => {
@@ -140,18 +165,25 @@ export function useWebGroupCall({
         });
       }
 
+      // Relay ICE candidates
       pc.onicecandidate = (event) => {
         if (event.candidate && socket?.connected) {
+          socket.emit('ice-candidate', {
+            to: remoteSocketId,
+            candidate: event.candidate.toJSON(),
+          });
+          // Backward-compatible alias
           socket.emit('peer:ice-candidate', {
             roomId: stateRef.current.roomId,
-            targetUserId: remoteUserId,
+            targetUserId: remoteSocketId,
             candidate: event.candidate.toJSON(),
           });
         }
       };
 
+      // Remote stream received
       pc.ontrack = (event) => {
-        let stream = peerStreamsRef.current.get(remoteUserId);
+        let stream = peerStreamsRef.current.get(remoteSocketId);
         if (event.streams && event.streams[0]) {
           stream = event.streams[0];
         } else {
@@ -159,13 +191,13 @@ export function useWebGroupCall({
           stream.addTrack(event.track);
         }
         if (stream) {
-          peerStreamsRef.current.set(remoteUserId, stream);
+          peerStreamsRef.current.set(remoteSocketId, stream);
         }
 
         setCallState((prev) => ({
           ...prev,
           participants: prev.participants.map((p) =>
-            p.id === remoteUserId ? { ...p, stream } : p,
+            p.id === remoteSocketId ? { ...p, stream } : p,
           ),
         }));
       };
@@ -177,28 +209,37 @@ export function useWebGroupCall({
             offerToReceiveVideo: true,
           });
           await pc.setLocalDescription(offer);
+
+          // Standard guide event
+          socket?.emit('offer', {
+            to: remoteSocketId,
+            offer: pc.localDescription,
+          });
+          // Backward-compatible alias
           socket?.emit('peer:offer', {
             roomId: stateRef.current.roomId,
-            targetUserId: remoteUserId,
-            sdp: offer,
+            targetUserId: remoteSocketId,
+            sdp: pc.localDescription,
           });
         } catch (e) {
-          console.error('Error creating offer for peer', remoteUserId, e);
+          console.error('Error creating offer for peer', remoteSocketId, e);
         }
       }
 
       return pc;
     },
-    [socket],
+    [iceConfig, socket],
   );
 
   // ── Join Group Call ──────────────────────────────────────────────
   const joinGroupCall = useCallback(
     async (roomId: string, mode: CallMode = 'video') => {
+      const roomCode = roomId.trim().toUpperCase() || 'TEST-ROOM';
+
       try {
         setCallState((prev) => ({
           ...prev,
-          roomId,
+          roomId: roomCode,
           mode,
           status: 'joining',
           error: null,
@@ -216,7 +257,6 @@ export function useWebGroupCall({
           });
         } catch (mediaErr: any) {
           console.warn('getUserMedia warning:', mediaErr);
-          // Fallback to audio only if video failed
           if (mode === 'video') {
             try {
               stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -250,8 +290,24 @@ export function useWebGroupCall({
         }));
 
         if (socket?.connected) {
+          // Standard guide event: join-room
+          socket.emit(
+            'join-room',
+            {
+              roomCode,
+              userName: currentUser.name,
+              userId: currentUser.id,
+            },
+            (ack: any) => {
+              if (ack) {
+                console.log(`[Web] Joined '${ack.roomCode}'. Total: ${ack.totalUsers}`);
+              }
+            },
+          );
+
+          // Backward-compatible alias
           socket.emit('room:join', {
-            roomId,
+            roomId: roomCode,
             user: {
               id: currentUser.id,
               name: currentUser.name,
@@ -309,11 +365,16 @@ export function useWebGroupCall({
 
   // ── Leave Group Call ─────────────────────────────────────────────
   const leaveGroupCall = useCallback(() => {
-    if (socket?.connected && stateRef.current.roomId) {
-      socket.emit('room:leave', {
-        roomId: stateRef.current.roomId,
-        userId: currentUser.id,
-      });
+    if (socket?.connected) {
+      // Standard guide event
+      socket.emit('leave-room');
+      // Backward-compatible alias
+      if (stateRef.current.roomId) {
+        socket.emit('room:leave', {
+          roomId: stateRef.current.roomId,
+          userId: currentUser.id,
+        });
+      }
     }
 
     cleanup();
@@ -342,15 +403,11 @@ export function useWebGroupCall({
       localParticipant: { ...prev.localParticipant, isMuted: nextMuted },
     }));
 
-    if (socket?.connected && stateRef.current.roomId) {
-      socket.emit('peer:media-toggle', {
-        roomId: stateRef.current.roomId,
-        userId: currentUser.id,
-        isMuted: nextMuted,
-        isCameraOff: stateRef.current.isCameraOff,
-      });
+    if (socket?.connected) {
+      // Standard guide event
+      socket.emit('toggle-audio', { enabled: !nextMuted });
     }
-  }, [currentUser.id, socket]);
+  }, [socket]);
 
   // ── Toggle Camera ────────────────────────────────────────────────
   const toggleCamera = useCallback(() => {
@@ -366,26 +423,20 @@ export function useWebGroupCall({
       localParticipant: { ...prev.localParticipant, isCameraOff: nextCameraOff },
     }));
 
-    if (socket?.connected && stateRef.current.roomId) {
-      socket.emit('peer:media-toggle', {
-        roomId: stateRef.current.roomId,
-        userId: currentUser.id,
-        isMuted: stateRef.current.isMuted,
-        isCameraOff: nextCameraOff,
-      });
+    if (socket?.connected) {
+      // Standard guide event
+      socket.emit('toggle-video', { enabled: !nextCameraOff });
     }
-  }, [currentUser.id, socket]);
+  }, [socket]);
 
   // ── Toggle Screen Sharing ────────────────────────────────────────
   const toggleScreenShare = useCallback(async () => {
     if (stateRef.current.isScreenSharing) {
-      // Stop screen share
       if (screenStreamRef.current) {
         screenStreamRef.current.getTracks().forEach((t) => t.stop());
         screenStreamRef.current = null;
       }
 
-      // Revert peer tracks to camera video
       if (localStreamRef.current) {
         const videoTrack = localStreamRef.current.getVideoTracks()[0];
         if (videoTrack) {
@@ -406,7 +457,6 @@ export function useWebGroupCall({
         },
       }));
     } else {
-      // Start screen share
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({
           video: true,
@@ -419,7 +469,6 @@ export function useWebGroupCall({
           toggleScreenShare();
         };
 
-        // Replace track on all active peers
         peersRef.current.forEach((pc) => {
           const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
           if (sender) sender.replaceTrack(screenTrack);
@@ -449,14 +498,10 @@ export function useWebGroupCall({
       localParticipant: { ...prev.localParticipant, isHandRaised: nextHand },
     }));
 
-    if (socket?.connected && stateRef.current.roomId) {
-      socket.emit('peer:hand-raise', {
-        roomId: stateRef.current.roomId,
-        userId: currentUser.id,
-        isHandRaised: nextHand,
-      });
+    if (socket?.connected) {
+      socket.emit('peer:hand-raise', { isHandRaised: nextHand });
     }
-  }, [currentUser.id, socket]);
+  }, [socket]);
 
   // ── Up to 50 Participants Stress Simulator ───────────────────────
   const addSimulatedUsers = useCallback((count: number = 1, forceVideo = false) => {
@@ -486,13 +531,11 @@ export function useWebGroupCall({
       };
     });
 
-    // Start background activity ticker for speaking waves and hand raises
     if (!simulationTimerRef.current) {
       simulationTimerRef.current = window.setInterval(() => {
         setCallState((prev) => {
           if (prev.participants.length === 0) return prev;
           const updated = prev.participants.map((p) => {
-            // randomly fluctuate speaking
             const roll = Math.random();
             const isSpeaking = !p.isMuted && roll > 0.75;
             return { ...p, isSpeaking };
@@ -505,7 +548,7 @@ export function useWebGroupCall({
 
   const fill50SimulatedUsers = useCallback(() => {
     setCallState((prev) => {
-      const currentTotal = 1 + prev.participants.length; // 1 is local user
+      const currentTotal = 1 + prev.participants.length;
       const needed = Math.max(0, 50 - currentTotal);
       if (needed === 0) return prev;
 
@@ -556,135 +599,221 @@ export function useWebGroupCall({
     }));
   }, []);
 
-  // ── Socket Room Listeners ────────────────────────────────────────
+  // ── Socket Room Listeners (Frontend Integration Guide Compliant) ─
   useEffect(() => {
     if (!socket) return;
 
-    const onRoomPeers = async ({ peers }: { peers?: Participant[] } = {}) => {
-      const safePeers = Array.isArray(peers) ? peers : [];
-      setCallState((prev) => ({ ...prev, participants: safePeers }));
-      for (const peer of safePeers) {
-        if (peer?.id) {
-          await createPeer(peer.id, true);
+    // 1. Peer Discovery: Server sends existing users to joiner
+    const onAllUsers = async ({ users }: { users?: Array<{ socketId: string; userName: string }> } = {}) => {
+      const safeUsers = Array.isArray(users) ? users : [];
+      console.log(`[Web Mesh] Received all-users list with ${safeUsers.length} peers`);
+
+      setCallState((prev) => {
+        const newParticipants = safeUsers.map((u) => ({
+          id: u.socketId,
+          name: u.userName,
+          isMuted: false,
+          isCameraOff: prev.mode === 'audio',
+          isSpeaking: false,
+          isHandRaised: false,
+          isHost: false,
+          stream: null,
+        }));
+        return { ...prev, participants: newParticipants };
+      });
+
+      // Joiner initiates offers to all existing peers
+      for (const user of safeUsers) {
+        if (user?.socketId) {
+          await createPeer(user.socketId, user.userName, true);
         }
       }
     };
 
-    const onPeerJoined = async ({ user }: { user: Participant }) => {
+    // 2. Peer Discovery: Existing users receive new joiner
+    const onUserConnected = async ({
+      socketId,
+      userName,
+      totalUsers,
+    }: {
+      socketId: string;
+      userName: string;
+      totalUsers?: number;
+    }) => {
+      console.log(`[Web Mesh] user-connected: ${userName} (${socketId}). Total: ${totalUsers}`);
       setCallState((prev) => {
-        if (prev.participants.some((p) => p.id === user.id)) return prev;
-        return { ...prev, participants: [...prev.participants, user] };
+        if (prev.participants.some((p) => p.id === socketId)) return prev;
+        return {
+          ...prev,
+          participants: [
+            ...prev.participants,
+            {
+              id: socketId,
+              name: userName,
+              isMuted: false,
+              isCameraOff: prev.mode === 'audio',
+              isSpeaking: false,
+              isHandRaised: false,
+              isHost: false,
+              stream: null,
+            },
+          ],
+        };
       });
-      await createPeer(user.id, false);
+      // Existing peer prepares connection and waits for the new joiner's offer
+      await createPeer(socketId, userName, false);
     };
 
-    const onPeerLeft = ({ userId }: { userId: string }) => {
-      const pc = peersRef.current.get(userId);
-      if (pc) {
-        pc.close();
-        peersRef.current.delete(userId);
-        peerStreamsRef.current.delete(userId);
-      }
-      setCallState((prev) => ({
-        ...prev,
-        participants: prev.participants.filter((p) => p.id !== userId),
-      }));
-    };
+    // 3. Receiving SDP Offer
+    const onOffer = async ({ from, offer, sdp, senderId }: { from?: string; offer?: any; sdp?: any; senderId?: string }) => {
+      const peerId = from || senderId;
+      const remoteOffer = offer || sdp;
+      if (!peerId || !remoteOffer) return;
 
-    const onPeerOffer = async ({ senderId, sdp }: { senderId: string; sdp: any }) => {
-      const pc = await createPeer(senderId, false);
+      const pc = await createPeer(peerId, `User_${peerId.slice(0, 4)}`, false);
       try {
-        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        await pc.setRemoteDescription(new RTCSessionDescription(remoteOffer));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
+
+        socket.emit('answer', {
+          to: peerId,
+          answer: pc.localDescription,
+        });
+        // Backward-compatible alias
         socket.emit('peer:answer', {
           roomId: stateRef.current.roomId,
-          targetUserId: senderId,
-          sdp: answer,
+          targetUserId: peerId,
+          sdp: pc.localDescription,
         });
       } catch (e) {
-        console.error('Error handling peer offer', e);
+        console.error('Error handling offer from peer:', peerId, e);
       }
     };
 
-    const onPeerAnswer = async ({ senderId, sdp }: { senderId: string; sdp: any }) => {
-      const pc = peersRef.current.get(senderId);
+    // 4. Receiving SDP Answer
+    const onAnswer = async ({ from, answer, sdp, senderId }: { from?: string; answer?: any; sdp?: any; senderId?: string }) => {
+      const peerId = from || senderId;
+      const remoteAnswer = answer || sdp;
+      if (!peerId || !remoteAnswer) return;
+
+      const pc = peersRef.current.get(peerId);
       if (pc) {
         try {
-          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          await pc.setRemoteDescription(new RTCSessionDescription(remoteAnswer));
         } catch (e) {
-          console.error('Error handling peer answer', e);
+          console.error('Error handling answer from peer:', peerId, e);
         }
       }
     };
 
-    const onPeerCandidate = async ({
-      senderId,
-      candidate,
-    }: {
-      senderId: string;
-      candidate: any;
-    }) => {
-      const pc = peersRef.current.get(senderId);
-      if (pc && candidate) {
+    // 5. Receiving ICE Candidate
+    const onIceCandidate = async ({ from, candidate, senderId }: { from?: string; candidate: any; senderId?: string }) => {
+      const peerId = from || senderId;
+      if (!peerId || !candidate) return;
+
+      const pc = peersRef.current.get(peerId);
+      if (pc) {
         try {
           await pc.addIceCandidate(new RTCIceCandidate(candidate));
         } catch (e) {
-          console.error('Error adding ICE candidate', e);
+          console.warn('Error adding ICE candidate from peer:', peerId, e);
         }
       }
     };
 
-    const onPeerMediaToggle = ({
-      userId,
-      isMuted,
-      isCameraOff,
-    }: {
-      userId: string;
-      isMuted: boolean;
-      isCameraOff: boolean;
-    }) => {
+    // 6. User Disconnected / Left
+    const onUserDisconnected = ({ socketId, userId, userName: _userName }: { socketId?: string; userId?: string; userName?: string }) => {
+      const peerId = socketId || userId;
+      if (!peerId) return;
+
+      const pc = peersRef.current.get(peerId);
+      if (pc) {
+        pc.close();
+        peersRef.current.delete(peerId);
+        peerStreamsRef.current.delete(peerId);
+      }
+
+      setCallState((prev) => ({
+        ...prev,
+        participants: prev.participants.filter((p) => p.id !== peerId),
+      }));
+    };
+
+    // 7. Peer Media Toggles
+    const onPeerToggleAudio = ({ socketId, enabled }: { socketId: string; enabled: boolean }) => {
       setCallState((prev) => ({
         ...prev,
         participants: prev.participants.map((p) =>
-          p.id === userId ? { ...p, isMuted, isCameraOff } : p,
+          p.id === socketId ? { ...p, isMuted: !enabled } : p,
         ),
       }));
     };
 
-    const onPeerHandRaise = ({
-      userId,
-      isHandRaised,
-    }: {
-      userId: string;
-      isHandRaised: boolean;
-    }) => {
+    const onPeerToggleVideo = ({ socketId, enabled }: { socketId: string; enabled: boolean }) => {
       setCallState((prev) => ({
         ...prev,
         participants: prev.participants.map((p) =>
-          p.id === userId ? { ...p, isHandRaised } : p,
+          p.id === socketId ? { ...p, isCameraOff: !enabled } : p,
         ),
       }));
     };
 
-    socket.on('room:peers', onRoomPeers);
-    socket.on('peer:joined', onPeerJoined);
-    socket.on('peer:left', onPeerLeft);
-    socket.on('peer:offer', onPeerOffer);
-    socket.on('peer:answer', onPeerAnswer);
-    socket.on('peer:ice-candidate', onPeerCandidate);
-    socket.on('peer:media-toggle', onPeerMediaToggle);
+    const onPeerHandRaise = ({ socketId, userId, isHandRaised }: { socketId?: string; userId?: string; isHandRaised: boolean }) => {
+      const peerId = socketId || userId;
+      setCallState((prev) => ({
+        ...prev,
+        participants: prev.participants.map((p) =>
+          p.id === peerId ? { ...p, isHandRaised } : p,
+        ),
+      }));
+    };
+
+    // Register standard guide events
+    socket.on('all-users', onAllUsers);
+    socket.on('user-connected', onUserConnected);
+    socket.on('offer', onOffer);
+    socket.on('answer', onAnswer);
+    socket.on('ice-candidate', onIceCandidate);
+    socket.on('user-disconnected', onUserDisconnected);
+    socket.on('peer:toggle-audio', onPeerToggleAudio);
+    socket.on('peer:toggle-video', onPeerToggleVideo);
     socket.on('peer:hand-raise', onPeerHandRaise);
 
+    // Backward-compatible aliases
+    socket.on('room:peers', onAllUsers);
+    socket.on('peer:joined', ({ user }: any) => {
+      if (user?.id) onUserConnected({ socketId: user.id, userName: user.name });
+    });
+    socket.on('peer:left', ({ userId, socketId }: any) => {
+      onUserDisconnected({ socketId: socketId || userId });
+    });
+    socket.on('peer:offer', onOffer);
+    socket.on('peer:answer', onAnswer);
+    socket.on('peer:ice-candidate', onIceCandidate);
+    socket.on('peer:media-toggle', ({ userId, isMuted, isCameraOff }: any) => {
+      if (typeof isMuted === 'boolean') onPeerToggleAudio({ socketId: userId, enabled: !isMuted });
+      if (typeof isCameraOff === 'boolean') onPeerToggleVideo({ socketId: userId, enabled: !isCameraOff });
+    });
+
     return () => {
-      socket.off('room:peers', onRoomPeers);
-      socket.off('peer:joined', onPeerJoined);
-      socket.off('peer:left', onPeerLeft);
-      socket.off('peer:offer', onPeerOffer);
-      socket.off('peer:answer', onPeerAnswer);
-      socket.off('peer:ice-candidate', onPeerCandidate);
-      socket.off('peer:media-toggle', onPeerMediaToggle);
+      socket.off('all-users', onAllUsers);
+      socket.off('user-connected', onUserConnected);
+      socket.off('offer', onOffer);
+      socket.off('answer', onAnswer);
+      socket.off('ice-candidate', onIceCandidate);
+      socket.off('user-disconnected', onUserDisconnected);
+      socket.off('peer:toggle-audio', onPeerToggleAudio);
+      socket.off('peer:toggle-video', onPeerToggleVideo);
       socket.off('peer:hand-raise', onPeerHandRaise);
+
+      socket.off('room:peers', onAllUsers);
+      socket.off('peer:joined');
+      socket.off('peer:left');
+      socket.off('peer:offer', onOffer);
+      socket.off('peer:answer', onAnswer);
+      socket.off('peer:ice-candidate', onIceCandidate);
+      socket.off('peer:media-toggle');
     };
   }, [createPeer, socket]);
 

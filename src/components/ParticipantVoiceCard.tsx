@@ -64,3 +64,4 @@ export const ParticipantVoiceCard: React.FC<ParticipantVoiceCardProps> = ({
     </div>
   );
 };
+

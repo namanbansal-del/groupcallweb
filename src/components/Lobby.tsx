@@ -11,7 +11,7 @@ interface LobbyProps {
 export const Lobby: React.FC<LobbyProps> = ({
   onJoin,
   defaultName = 'Alex Johnson',
-  defaultRoomId = 'DEMO-50-ROOM',
+  defaultRoomId = 'TEST-ROOM',
 }) => {
   const [roomId, setRoomId] = useState(defaultRoomId);
   const [name, setName] = useState(defaultName);
@@ -207,3 +207,4 @@ export const Lobby: React.FC<LobbyProps> = ({
     </div>
   );
 };
+

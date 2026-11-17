@@ -29,3 +29,4 @@ export interface GroupCallState {
   durationSec: number;
   error: string | null;
 }
+

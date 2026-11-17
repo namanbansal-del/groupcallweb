@@ -7,7 +7,7 @@ import { ActiveCall } from './components/ActiveCall';
 
 // Connect to the shared signaling server (works seamlessly with the mobile app!)
 const SIGNALING_SERVER_URL =
-  import.meta.env.VITE_SIGNALING_URL || 'http://localhost:3000';
+  import.meta.env.VITE_SIGNALING_URL || 'http://localhost:4000';
 
 export function App() {
   const [currentUser, setCurrentUser] = useState(() => ({
@@ -25,6 +25,7 @@ export function App() {
   const call = useWebGroupCall({
     socket,
     currentUser,
+    serverUrl: SIGNALING_SERVER_URL,
   });
 
   const handleJoin = async (roomId: string, name: string, mode: CallMode) => {
@@ -47,3 +48,4 @@ export function App() {
 }
 
 export default App;
+
