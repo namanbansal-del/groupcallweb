@@ -9,22 +9,6 @@ const FALLBACK_ICE_SERVERS: RTCConfiguration = {
   ],
 };
 
-const SAMPLE_NAMES = [
-  'Sarah Jenkins', 'Rohan Verma', 'Fatima Al-Mansoor', 'Nikola Tesla',
-  'David Kim', 'Elena Rostova', 'Marcus Brody', 'Aisha Diallo',
-  'Liam Chen', 'Olivia Martin', 'Ethan Brown', 'Sophia Lee',
-  'Mason Garcia', 'Isabella Miller', 'James Davis', 'Mia Rodriguez',
-  'Benjamin Martinez', 'Charlotte Hernandez', 'Lucas Lopez', 'Amelia Gonzalez',
-  'Henry Wilson', 'Harper Anderson', 'Alexander Thomas', 'Evelyn Taylor',
-  'Daniel Moore', 'Abigail Jackson', 'Matthew Martin', 'Emily Lee',
-  'Jackson Perez', 'Elizabeth Thompson', 'Sebastian White', 'Mila Harris',
-  'Jack Sanchez', 'Ella Clark', 'Samuel Ramirez', 'Avery Lewis',
-  'Owen Robinson', 'Sofia Walker', 'Theodore Young', 'Camila Allen',
-  'Wyatt King', 'Aria Wright', 'John Scott', 'Scarlett Torres',
-  'Leo Nguyen', 'Victoria Hill', 'Oliver Flores', 'Grace Green',
-  'Noah Adams', 'Chloe Nelson',
-];
-
 export function useWebGroupCall({
   socket,
   currentUser,
@@ -70,7 +54,6 @@ export function useWebGroupCall({
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const peerStreamsRef = useRef<Map<string, MediaStream>>(new Map());
   const timerRef = useRef<number | null>(null);
-  const simulationTimerRef = useRef<number | null>(null);
   const stateRef = useRef(callState);
   stateRef.current = callState;
 
@@ -336,10 +319,6 @@ export function useWebGroupCall({
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-    if (simulationTimerRef.current) {
-      clearInterval(simulationTimerRef.current);
-      simulationTimerRef.current = null;
-    }
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
@@ -503,102 +482,6 @@ export function useWebGroupCall({
       socket.emit('peer:hand-raise', { isHandRaised: nextHand });
     }
   }, [socket]);
-
-  // ── Up to 50 Participants Stress Simulator ───────────────────────
-  const addSimulatedUsers = useCallback((count: number = 1, forceVideo = false) => {
-    setCallState((prev) => {
-      const currentCount = prev.participants.length;
-      const newParticipants: Participant[] = [];
-
-      for (let i = 0; i < count; i++) {
-        const idx = (currentCount + i) % SAMPLE_NAMES.length;
-        const name = `${SAMPLE_NAMES[idx]}`;
-        const id = `sim_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`;
-        newParticipants.push({
-          id,
-          name,
-          isMuted: Math.random() > 0.65,
-          isCameraOff: forceVideo ? false : (prev.mode === 'audio' || Math.random() > 0.4),
-          isSpeaking: Math.random() > 0.7,
-          isHandRaised: Math.random() > 0.85,
-          isHost: false,
-          stream: null,
-        });
-      }
-
-      return {
-        ...prev,
-        participants: [...prev.participants, ...newParticipants],
-      };
-    });
-
-    if (!simulationTimerRef.current) {
-      simulationTimerRef.current = window.setInterval(() => {
-        setCallState((prev) => {
-          if (prev.participants.length === 0) return prev;
-          const updated = prev.participants.map((p) => {
-            const roll = Math.random();
-            const isSpeaking = !p.isMuted && roll > 0.75;
-            return { ...p, isSpeaking };
-          });
-          return { ...prev, participants: updated };
-        });
-      }, 2500);
-    }
-  }, []);
-
-  const fill50SimulatedUsers = useCallback(() => {
-    setCallState((prev) => {
-      const currentTotal = 1 + prev.participants.length;
-      const needed = Math.max(0, 50 - currentTotal);
-      if (needed === 0) return prev;
-
-      const newSims: Participant[] = [];
-      for (let i = 0; i < needed; i++) {
-        const name = SAMPLE_NAMES[i % SAMPLE_NAMES.length];
-        const id = `sim_50_${i}_${Date.now()}`;
-        newSims.push({
-          id,
-          name,
-          isMuted: i % 3 === 0,
-          isCameraOff: prev.mode === 'audio' ? true : i % 4 === 0,
-          isSpeaking: i === 1 || i === 3,
-          isHandRaised: i === 2 || i === 7,
-          isHost: false,
-          stream: null,
-        });
-      }
-
-      return {
-        ...prev,
-        participants: [...prev.participants, ...newSims],
-      };
-    });
-
-    if (!simulationTimerRef.current) {
-      simulationTimerRef.current = window.setInterval(() => {
-        setCallState((prev) => {
-          if (prev.participants.length === 0) return prev;
-          const updated = prev.participants.map((p, index) => {
-            const isSpeaking = !p.isMuted && (index % 4 === Math.floor(Math.random() * 4));
-            return { ...p, isSpeaking };
-          });
-          return { ...prev, participants: updated };
-        });
-      }, 2800);
-    }
-  }, []);
-
-  const clearSimulatedUsers = useCallback(() => {
-    if (simulationTimerRef.current) {
-      clearInterval(simulationTimerRef.current);
-      simulationTimerRef.current = null;
-    }
-    setCallState((prev) => ({
-      ...prev,
-      participants: prev.participants.filter((p) => !p.id.startsWith('sim_')),
-    }));
-  }, []);
 
   // ── Socket Room Listeners (Frontend Integration Guide Compliant) ─
   useEffect(() => {
@@ -834,8 +717,5 @@ export function useWebGroupCall({
     toggleCamera,
     toggleScreenShare,
     toggleHandRaise,
-    addSimulatedUsers,
-    fill50SimulatedUsers,
-    clearSimulatedUsers,
   };
 }

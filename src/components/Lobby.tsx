@@ -8,6 +8,7 @@ interface LobbyProps {
   defaultRoomId?: string;
   serverUrl: string;
   onUpdateServerUrl: (url: string) => void;
+  isSocketConnected?: boolean;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
@@ -16,6 +17,7 @@ export const Lobby: React.FC<LobbyProps> = ({
   defaultRoomId = 'TEST-ROOM',
   serverUrl,
   onUpdateServerUrl,
+  isSocketConnected = false,
 }) => {
   const [roomId, setRoomId] = useState(defaultRoomId);
   const [name, setName] = useState(defaultName);
@@ -198,16 +200,32 @@ export const Lobby: React.FC<LobbyProps> = ({
           </button>
         </form>
 
-        {/* Server Connection Config (Optional) */}
+        {/* Server Connection Status & Config */}
         <div className="server-config-section">
-          <button
-            type="button"
-            className="server-config-toggle"
-            onClick={() => setShowServerConfig(!showServerConfig)}
-          >
-            <Settings size={14} />
-            <span>Signaling Server: {serverUrl}</span>
-          </button>
+          <div className="server-status-bar">
+            <span
+              className={`server-status-pill ${
+                isSocketConnected ? 'status-connected' : 'status-disconnected'
+              }`}
+            >
+              <span className="status-dot" />
+              {isSocketConnected ? 'Server Online' : 'Server Disconnected'}
+            </span>
+            <button
+              type="button"
+              className="server-config-toggle"
+              onClick={() => setShowServerConfig(!showServerConfig)}
+            >
+              <Settings size={14} />
+              <span>Change Server URL</span>
+            </button>
+          </div>
+
+          {!isSocketConnected && (
+            <div className="server-warning-box">
+              ⚠️ Cannot reach signaling server at <code>{serverUrl}</code>. Multiple users cannot see each other without a connected signaling server.
+            </div>
+          )}
 
           {showServerConfig && (
             <div className="server-config-card">
@@ -218,7 +236,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                 <input
                   type="text"
                   className="server-input"
-                  placeholder="e.g. http://localhost:4000 or https://your-server.com"
+                  placeholder="e.g. https://your-signaling-server.com or http://192.168.1.X:4000"
                   value={customServerUrl}
                   onChange={(e) => setCustomServerUrl(e.target.value)}
                 />
@@ -230,11 +248,11 @@ export const Lobby: React.FC<LobbyProps> = ({
                     setShowServerConfig(false);
                   }}
                 >
-                  Save
+                  Save & Connect
                 </button>
               </div>
               <p className="server-config-hint">
-                Enter your backend team's server IP or domain to connect with other real devices.
+                Enter your live signaling server address (HTTPS or public URL). Both devices must point to the same server to join the same room.
               </p>
             </div>
           )}

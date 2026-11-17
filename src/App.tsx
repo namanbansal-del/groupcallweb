@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { io } from 'socket.io-client';
 import type { CallMode } from './types';
 import { useWebGroupCall } from './hooks/useWebGroupCall';
@@ -19,12 +19,39 @@ export function App() {
     name: 'Alex Johnson',
   }));
 
+  const [isSocketConnected, setIsSocketConnected] = useState(false);
+
   const socket = useMemo(() => {
     return io(serverUrl, {
       autoConnect: true,
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1500,
     });
   }, [serverUrl]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const onConnect = () => setIsSocketConnected(true);
+    const onDisconnect = () => setIsSocketConnected(false);
+    const onConnectError = () => setIsSocketConnected(false);
+
+    if (socket.connected) {
+      setIsSocketConnected(true);
+    } else {
+      setIsSocketConnected(false);
+    }
+
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    socket.on('connect_error', onConnectError);
+
+    return () => {
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.off('connect_error', onConnectError);
+    };
+  }, [socket]);
 
   const call = useWebGroupCall({
     socket,
@@ -34,8 +61,9 @@ export function App() {
 
   const handleUpdateServerUrl = (newUrl: string) => {
     if (!newUrl) return;
-    localStorage.setItem('groupcall_server_url', newUrl);
-    setServerUrl(newUrl);
+    const cleaned = newUrl.trim().replace(/\/+$/, '');
+    localStorage.setItem('groupcall_server_url', cleaned);
+    setServerUrl(cleaned);
   };
 
   const handleJoin = async (roomId: string, name: string, mode: CallMode) => {
@@ -56,6 +84,7 @@ export function App() {
           defaultName={currentUser.name}
           serverUrl={serverUrl}
           onUpdateServerUrl={handleUpdateServerUrl}
+          isSocketConnected={isSocketConnected}
         />
       )}
     </div>

@@ -10,9 +10,6 @@ import {
   Users,
   ChevronLeft,
   ChevronRight,
-  FlaskConical,
-  Plus,
-  RefreshCw,
 } from 'lucide-react';
 import type { Participant } from '../types';
 import { useWebGroupCall } from '../hooks/useWebGroupCall';
@@ -33,14 +30,10 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
     toggleScreenShare,
     toggleHandRaise,
     leaveGroupCall,
-    addSimulatedUsers,
-    fill50SimulatedUsers,
-    clearSimulatedUsers,
   } = call;
 
   const [currentPage, setCurrentPage] = useState(0);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [showStressMenu, setShowStressMenu] = useState(false);
 
   // Group all participants including local user
   const allUsers: Participant[] = useMemo(() => {
@@ -103,75 +96,6 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         </div>
 
         <div className="call-header-right">
-          {/* 🧪 Stress Simulator Dropdown Button */}
-          <div className="stress-menu-wrapper">
-            <button
-              type="button"
-              className={`btn-header-tool ${showStressMenu ? 'btn-tool-active' : ''}`}
-              onClick={() => setShowStressMenu(!showStressMenu)}
-            >
-              <FlaskConical size={16} />
-              <span>Test ({allUsers.length}/50)</span>
-            </button>
-
-            {showStressMenu && (
-              <div className="stress-dropdown-menu">
-                <div className="stress-menu-header">🧪 50-User Simulator</div>
-                <button
-                  type="button"
-                  className="stress-menu-item"
-                  onClick={() => {
-                    addSimulatedUsers(1);
-                  }}
-                >
-                  <Plus size={15} />
-                  <span>+1 Audio Participant</span>
-                </button>
-                <button
-                  type="button"
-                  className="stress-menu-item"
-                  onClick={() => {
-                    addSimulatedUsers(1, true);
-                  }}
-                >
-                  <Plus size={15} />
-                  <span>+1 Video Participant</span>
-                </button>
-                <button
-                  type="button"
-                  className="stress-menu-item"
-                  onClick={() => {
-                    addSimulatedUsers(5);
-                  }}
-                >
-                  <Plus size={15} />
-                  <span>+5 Participants</span>
-                </button>
-                <button
-                  type="button"
-                  className="stress-menu-item stress-primary"
-                  onClick={() => {
-                    fill50SimulatedUsers();
-                    setShowStressMenu(false);
-                  }}
-                >
-                  <span>🚀 Fill to 50 Users</span>
-                </button>
-                <button
-                  type="button"
-                  className="stress-menu-item stress-danger"
-                  onClick={() => {
-                    clearSimulatedUsers();
-                    setCurrentPage(0);
-                  }}
-                >
-                  <RefreshCw size={14} />
-                  <span>Reset Test Users</span>
-                </button>
-              </div>
-            )}
-          </div>
-
           {/* Participant Drawer Button */}
           <button
             type="button"
@@ -199,15 +123,8 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
       {allUsers.length === 1 && (
         <div className="single-user-banner">
           <span>
-            👋 You are currently the only person in <strong>{callState.roomId}</strong>.
+            Waiting for others to join <strong>{callState.roomId}</strong>. Share this Room ID with participants to connect dynamically.
           </span>
-          <button
-            type="button"
-            className="banner-stress-btn"
-            onClick={() => fill50SimulatedUsers()}
-          >
-            🚀 Click to Fill 50 Participants
-          </button>
         </div>
       )}
 
@@ -249,7 +166,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
                 size="large"
               />
               <div className="single-tip-box">
-                Waiting for others to join... Tap <strong>Test (1/50)</strong> to simulate up to 50 users.
+                Waiting for others to join... Share room ID: <strong>{callState.roomId}</strong>
               </div>
             </div>
           ) : (
