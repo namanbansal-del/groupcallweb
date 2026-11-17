@@ -1,17 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Video, VideoOff, Mic, MicOff, Users, ArrowRight, ShieldCheck, Sparkles } from 'lucide-react';
+import { Video, VideoOff, Mic, MicOff, Users, ArrowRight, ShieldCheck, Sparkles, Settings } from 'lucide-react';
 import type { CallMode } from '../types';
 
 interface LobbyProps {
   onJoin: (roomId: string, name: string, mode: CallMode) => void;
   defaultName?: string;
   defaultRoomId?: string;
+  serverUrl: string;
+  onUpdateServerUrl: (url: string) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
   onJoin,
   defaultName = 'Alex Johnson',
   defaultRoomId = 'TEST-ROOM',
+  serverUrl,
+  onUpdateServerUrl,
 }) => {
   const [roomId, setRoomId] = useState(defaultRoomId);
   const [name, setName] = useState(defaultName);
@@ -19,6 +23,8 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [cameraEnabled, setCameraEnabled] = useState(true);
   const [micEnabled, setMicEnabled] = useState(true);
+  const [showServerConfig, setShowServerConfig] = useState(false);
+  const [customServerUrl, setCustomServerUrl] = useState(serverUrl);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   // Initialize camera preview
@@ -191,6 +197,48 @@ export const Lobby: React.FC<LobbyProps> = ({
             <ArrowRight size={18} />
           </button>
         </form>
+
+        {/* Server Connection Config (Optional) */}
+        <div className="server-config-section">
+          <button
+            type="button"
+            className="server-config-toggle"
+            onClick={() => setShowServerConfig(!showServerConfig)}
+          >
+            <Settings size={14} />
+            <span>Signaling Server: {serverUrl}</span>
+          </button>
+
+          {showServerConfig && (
+            <div className="server-config-card">
+              <label className="server-config-label">
+                Backend Signaling Server URL:
+              </label>
+              <div className="server-input-row">
+                <input
+                  type="text"
+                  className="server-input"
+                  placeholder="e.g. http://localhost:4000 or https://your-server.com"
+                  value={customServerUrl}
+                  onChange={(e) => setCustomServerUrl(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="server-save-btn"
+                  onClick={() => {
+                    onUpdateServerUrl(customServerUrl.trim());
+                    setShowServerConfig(false);
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+              <p className="server-config-hint">
+                Enter your backend team's server IP or domain to connect with other real devices.
+              </p>
+            </div>
+          )}
+        </div>
 
         {/* Feature Badges Footer */}
         <div className="lobby-features">

@@ -5,28 +5,38 @@ import { useWebGroupCall } from './hooks/useWebGroupCall';
 import { Lobby } from './components/Lobby';
 import { ActiveCall } from './components/ActiveCall';
 
-// Connect to the shared signaling server (works seamlessly with the mobile app!)
-const SIGNALING_SERVER_URL =
-  import.meta.env.VITE_SIGNALING_URL || 'http://localhost:4000';
-
 export function App() {
+  const [serverUrl, setServerUrl] = useState(() => {
+    return (
+      localStorage.getItem('groupcall_server_url') ||
+      import.meta.env.VITE_SIGNALING_URL ||
+      'http://localhost:4000'
+    );
+  });
+
   const [currentUser, setCurrentUser] = useState(() => ({
     id: `web_user_${Math.floor(1000 + Math.random() * 9000)}`,
     name: 'Alex Johnson',
   }));
 
   const socket = useMemo(() => {
-    return io(SIGNALING_SERVER_URL, {
+    return io(serverUrl, {
       autoConnect: true,
       transports: ['websocket'],
     });
-  }, []);
+  }, [serverUrl]);
 
   const call = useWebGroupCall({
     socket,
     currentUser,
-    serverUrl: SIGNALING_SERVER_URL,
+    serverUrl,
   });
+
+  const handleUpdateServerUrl = (newUrl: string) => {
+    if (!newUrl) return;
+    localStorage.setItem('groupcall_server_url', newUrl);
+    setServerUrl(newUrl);
+  };
 
   const handleJoin = async (roomId: string, name: string, mode: CallMode) => {
     setCurrentUser((prev) => ({ ...prev, name }));
@@ -41,7 +51,12 @@ export function App() {
       {isInCall ? (
         <ActiveCall call={call} />
       ) : (
-        <Lobby onJoin={handleJoin} defaultName={currentUser.name} />
+        <Lobby
+          onJoin={handleJoin}
+          defaultName={currentUser.name}
+          serverUrl={serverUrl}
+          onUpdateServerUrl={handleUpdateServerUrl}
+        />
       )}
     </div>
   );

@@ -195,6 +195,22 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         </div>
       )}
 
+      {/* Helper Banner when alone in the room */}
+      {allUsers.length === 1 && (
+        <div className="single-user-banner">
+          <span>
+            👋 You are currently the only person in <strong>{callState.roomId}</strong>.
+          </span>
+          <button
+            type="button"
+            className="banner-stress-btn"
+            onClick={() => fill50SimulatedUsers()}
+          >
+            🚀 Click to Fill 50 Participants
+          </button>
+        </div>
+      )}
+
       {/* Main Calling Stage */}
       <main className="call-stage-area">
         {/* Previous Page Arrow */}
