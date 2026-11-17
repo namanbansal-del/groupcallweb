@@ -210,16 +210,17 @@ export function useWebGroupCall({
           });
           await pc.setLocalDescription(offer);
 
+          const offerData = { type: offer.type, sdp: offer.sdp };
           // Standard guide event
           socket?.emit('offer', {
             to: remoteSocketId,
-            offer: pc.localDescription,
+            offer: offerData,
           });
           // Backward-compatible alias
           socket?.emit('peer:offer', {
             roomId: stateRef.current.roomId,
             targetUserId: remoteSocketId,
-            sdp: pc.localDescription,
+            sdp: offerData,
           });
         } catch (e) {
           console.error('Error creating offer for peer', remoteSocketId, e);
@@ -676,15 +677,16 @@ export function useWebGroupCall({
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
+        const answerData = { type: answer.type, sdp: answer.sdp };
         socket.emit('answer', {
           to: peerId,
-          answer: pc.localDescription,
+          answer: answerData,
         });
         // Backward-compatible alias
         socket.emit('peer:answer', {
           roomId: stateRef.current.roomId,
           targetUserId: peerId,
-          sdp: pc.localDescription,
+          sdp: answerData,
         });
       } catch (e) {
         console.error('Error handling offer from peer:', peerId, e);
