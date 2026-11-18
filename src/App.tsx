@@ -72,13 +72,19 @@ export function App() {
     setServerUrl(cleaned);
   };
 
-  const handleJoin = async (roomId: string, name: string, mode: CallMode) => {
+  const handleJoin = async (
+    roomId: string,
+    name: string,
+    mode: CallMode,
+    cameraEnabled: boolean = true,
+    micEnabled: boolean = true
+  ) => {
     const finalName = name.trim() || currentUser.name;
     setCurrentUser((prev) => ({ ...prev, name: finalName }));
     try {
       localStorage.setItem('groupcall_user_name', finalName);
     } catch {}
-    await call.joinGroupCall(roomId, mode, finalName);
+    await call.joinGroupCall(roomId, mode, finalName, cameraEnabled, micEnabled);
   };
 
   const isInCall =

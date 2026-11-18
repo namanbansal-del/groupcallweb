@@ -130,8 +130,10 @@ export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
                           <span className="status-speaking">Speaking</span>
                         ) : p.isMuted ? (
                           <span className="status-muted">Muted</span>
-                        ) : (
+                        ) : isLocal || p.stream ? (
                           <span className="status-connected">Connected</span>
+                        ) : (
+                          <span style={{ color: '#94A3B8' }}>Offline / Idle</span>
                         )}
                       </div>
                     </div>

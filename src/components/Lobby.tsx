@@ -1,9 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Video, VideoOff, Mic, MicOff, Users, ArrowRight, ShieldCheck, Sparkles, Settings } from 'lucide-react';
+import { Video, VideoOff, Mic, MicOff, Users, ArrowRight, Dices } from 'lucide-react';
 import type { CallMode } from '../types';
 
 interface LobbyProps {
-  onJoin: (roomId: string, name: string, mode: CallMode) => void;
+  onJoin: (
+    roomId: string,
+    name: string,
+    mode: CallMode,
+    cameraEnabled?: boolean,
+    micEnabled?: boolean
+  ) => void;
   defaultName?: string;
   defaultRoomId?: string;
   serverUrl: string;
@@ -14,12 +20,16 @@ interface LobbyProps {
 export const Lobby: React.FC<LobbyProps> = ({
   onJoin,
   defaultName = 'Alex Johnson',
-  defaultRoomId = 'TEST-ROOM',
+  defaultRoomId,
   serverUrl,
   onUpdateServerUrl,
   isSocketConnected = false,
 }) => {
-  const [roomId, setRoomId] = useState(defaultRoomId);
+  // Generate a random room by default to avoid crowding into the shared TEST-ROOM
+  const [roomId, setRoomId] = useState(() => {
+    if (defaultRoomId) return defaultRoomId;
+    return `ROOM-${Math.floor(1000 + Math.random() * 9000)}`;
+  });
   const [name, setName] = useState(defaultName);
   const [mode, setMode] = useState<CallMode>('video');
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
@@ -28,6 +38,7 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [showServerConfig, setShowServerConfig] = useState(false);
   const [customServerUrl, setCustomServerUrl] = useState(serverUrl);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const previewStreamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     if (defaultName) {
@@ -46,10 +57,13 @@ export const Lobby: React.FC<LobbyProps> = ({
           audio: true,
         });
         if (active) {
+          previewStreamRef.current = stream;
           setPreviewStream(stream);
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
           }
+        } else {
+          stream.getTracks().forEach((t) => t.stop());
         }
       } catch (err) {
         console.warn('Could not access camera/mic preview:', err);
@@ -60,34 +74,49 @@ export const Lobby: React.FC<LobbyProps> = ({
 
     return () => {
       active = false;
-      previewStream?.getTracks().forEach((t) => t.stop());
+      if (previewStreamRef.current) {
+        previewStreamRef.current.getTracks().forEach((t) => t.stop());
+        previewStreamRef.current = null;
+      }
     };
   }, []);
 
   const togglePreviewCam = () => {
-    if (previewStream) {
-      previewStream.getVideoTracks().forEach((t) => {
-        t.enabled = !cameraEnabled;
+    const nextState = !cameraEnabled;
+    setCameraEnabled(nextState);
+    if (previewStreamRef.current) {
+      previewStreamRef.current.getVideoTracks().forEach((t) => {
+        t.enabled = nextState;
       });
-      setCameraEnabled(!cameraEnabled);
     }
   };
 
   const togglePreviewMic = () => {
-    if (previewStream) {
-      previewStream.getAudioTracks().forEach((t) => {
-        t.enabled = !micEnabled;
+    const nextState = !micEnabled;
+    setMicEnabled(nextState);
+    if (previewStreamRef.current) {
+      previewStreamRef.current.getAudioTracks().forEach((t) => {
+        t.enabled = nextState;
       });
-      setMicEnabled(!micEnabled);
     }
+  };
+
+  const generateRandomRoom = () => {
+    setRoomId(`ROOM-${Math.floor(1000 + Math.random() * 9000)}`);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!roomId.trim() || !name.trim()) return;
-    // Release preview stream so ActiveCall can take control of media
-    previewStream?.getTracks().forEach((t) => t.stop());
-    onJoin(roomId.trim().toUpperCase(), name.trim(), mode);
+
+    // Release preview stream tracks completely so hardware camera light shuts off
+    if (previewStreamRef.current) {
+      previewStreamRef.current.getTracks().forEach((t) => t.stop());
+      previewStreamRef.current = null;
+    }
+    setPreviewStream(null);
+
+    onJoin(roomId.trim().toUpperCase(), name.trim(), mode, cameraEnabled, micEnabled);
   };
 
   return (
@@ -185,18 +214,44 @@ export const Lobby: React.FC<LobbyProps> = ({
           </div>
 
           <div className="form-group">
-            <label className="form-label" htmlFor="roomIdInput">
-              Meeting Room ID
-            </label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <label className="form-label" htmlFor="roomIdInput" style={{ margin: 0 }}>
+                Meeting Room ID
+              </label>
+              <button
+                type="button"
+                onClick={generateRandomRoom}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--primary)',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: 0,
+                }}
+              >
+                <Dices size={14} />
+                <span>New Clean Room</span>
+              </button>
+            </div>
             <input
               id="roomIdInput"
               type="text"
               className="form-input"
-              placeholder="e.g. DEMO-50-ROOM"
+              placeholder="e.g. ROOM-5821 or TEST-ROOM"
               value={roomId}
               onChange={(e) => setRoomId(e.target.value.toUpperCase())}
               required
             />
+            {roomId === 'TEST-ROOM' && (
+              <span style={{ fontSize: '11px', color: '#D97706', marginTop: '4px', display: 'block' }}>
+                Note: TEST-ROOM is a shared public test room with existing participants. Click "New Clean Room" for a private meeting.
+              </span>
+            )}
           </div>
 
           {/* Join Call Button */}
@@ -206,7 +261,7 @@ export const Lobby: React.FC<LobbyProps> = ({
           </button>
         </form>
 
-        {/* Server Connection Status & Config */}
+        {/* Server Connection Status Bar */}
         <div className="server-config-section">
           <div className="server-status-bar">
             <span
@@ -217,19 +272,20 @@ export const Lobby: React.FC<LobbyProps> = ({
               <span className="status-dot" />
               {isSocketConnected ? 'Server Online' : 'Server Disconnected'}
             </span>
+
             <button
               type="button"
               className="server-config-toggle"
               onClick={() => setShowServerConfig(!showServerConfig)}
             >
-              <Settings size={14} />
               <span>Change Server URL</span>
             </button>
           </div>
 
           {!isSocketConnected && (
             <div className="server-warning-box">
-              ⚠️ Cannot reach signaling server at <code>{serverUrl}</code>. Multiple users cannot see each other without a connected signaling server.
+              Cannot reach signaling server at <code>{serverUrl}</code>. Multiple users
+              cannot see each other without a connected signaling server.
             </div>
           )}
 
@@ -242,7 +298,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                 <input
                   type="text"
                   className="server-input"
-                  placeholder="e.g. https://your-signaling-server.com or http://192.168.1.X:4000"
+                  placeholder="e.g. https://tech.techugo.com:1065"
                   value={customServerUrl}
                   onChange={(e) => setCustomServerUrl(e.target.value)}
                 />
@@ -257,26 +313,10 @@ export const Lobby: React.FC<LobbyProps> = ({
                   Save & Connect
                 </button>
               </div>
-              <p className="server-config-hint">
-                Enter your live signaling server address (HTTPS or public URL). Both devices must point to the same server to join the same room.
-              </p>
             </div>
           )}
-        </div>
-
-        {/* Feature Badges Footer */}
-        <div className="lobby-features">
-          <div className="feature-item">
-            <ShieldCheck size={16} color="#10B981" />
-            <span>P2P Encrypted</span>
-          </div>
-          <div className="feature-item">
-            <Sparkles size={16} color="#2563EB" />
-            <span>50-User Stress Test Ready</span>
-          </div>
         </div>
       </div>
     </div>
   );
 };
-

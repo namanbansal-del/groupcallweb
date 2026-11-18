@@ -295,9 +295,17 @@ export function useWebGroupCall({
 
   // ── Join Group Call ──────────────────────────────────────────────
   const joinGroupCall = useCallback(
-    async (roomId: string, mode: CallMode = 'video', userName?: string) => {
+    async (
+      roomId: string,
+      mode: CallMode = 'video',
+      userName?: string,
+      cameraEnabled: boolean = true,
+      micEnabled: boolean = true
+    ) => {
       const roomCode = roomId.trim().toUpperCase() || 'TEST-ROOM';
       const effectiveName = (userName || currentUser.name || 'Alex Johnson').trim();
+      const initialCameraOff = mode === 'audio' || !cameraEnabled;
+      const initialMuted = !micEnabled;
 
       try {
         setCallState((prev) => ({
@@ -305,10 +313,14 @@ export function useWebGroupCall({
           roomId: roomCode,
           mode,
           status: 'joining',
+          isCameraOff: initialCameraOff,
+          isMuted: initialMuted,
           error: null,
           localParticipant: {
             ...prev.localParticipant,
             name: effectiveName,
+            isCameraOff: initialCameraOff,
+            isMuted: initialMuted,
             socketId: socket?.id || currentUser.id,
             userId: currentUser.id,
           },
@@ -318,13 +330,24 @@ export function useWebGroupCall({
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             audio: true,
-            video: mode === 'video' ? { width: { ideal: 640 }, height: { ideal: 480 } } : false,
+            video: initialCameraOff ? false : { width: { ideal: 640 }, height: { ideal: 480 } },
           });
+
+          if (stream && initialMuted) {
+            stream.getAudioTracks().forEach((track) => {
+              track.enabled = false;
+            });
+          }
         } catch (mediaErr: any) {
           console.warn('getUserMedia warning:', mediaErr);
-          if (mode === 'video') {
+          if (!initialCameraOff) {
             try {
               stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              if (stream && initialMuted) {
+                stream.getAudioTracks().forEach((track) => {
+                  track.enabled = false;
+                });
+              }
             } catch {
               stream = null;
             }
@@ -346,12 +369,14 @@ export function useWebGroupCall({
         setCallState((prev) => ({
           ...prev,
           status: 'joined',
+          isCameraOff: initialCameraOff,
+          isMuted: initialMuted,
           localParticipant: {
             ...prev.localParticipant,
             name: effectiveName,
             stream,
-            isMuted: false,
-            isCameraOff: mode === 'audio',
+            isMuted: initialMuted,
+            isCameraOff: initialCameraOff,
           },
         }));
 
@@ -378,8 +403,8 @@ export function useWebGroupCall({
               id: currentUser.id,
               name: effectiveName,
               avatar: currentUser.avatar,
-              isMuted: false,
-              isCameraOff: mode === 'audio',
+              isMuted: initialMuted,
+              isCameraOff: initialCameraOff,
               mode,
             },
           });
@@ -497,17 +522,57 @@ export function useWebGroupCall({
   }, [socket]);
 
   // ── Toggle Camera ────────────────────────────────────────────────
-  const toggleCamera = useCallback(() => {
+  const toggleCamera = useCallback(async () => {
     const nextCameraOff = !stateRef.current.isCameraOff;
-    if (localStreamRef.current) {
-      localStreamRef.current.getVideoTracks().forEach((track) => {
-        track.enabled = !nextCameraOff;
+
+    if (nextCameraOff) {
+      // Stopping camera: Stop all video tracks completely so camera hardware sensor powers down
+      if (localStreamRef.current) {
+        localStreamRef.current.getVideoTracks().forEach((track) => {
+          track.stop();
+          localStreamRef.current?.removeTrack(track);
+        });
+      }
+      peersRef.current.forEach((pc) => {
+        const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+        if (sender) {
+          sender.replaceTrack(null).catch(() => {});
+        }
       });
+    } else {
+      // Starting camera: acquire fresh video track from getUserMedia
+      try {
+        const videoStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 } },
+        });
+        const newTrack = videoStream.getVideoTracks()[0];
+        if (newTrack) {
+          if (!localStreamRef.current) {
+            localStreamRef.current = new MediaStream();
+          }
+          localStreamRef.current.addTrack(newTrack);
+          peersRef.current.forEach((pc) => {
+            const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+            if (sender) {
+              sender.replaceTrack(newTrack).catch(() => {});
+            } else {
+              pc.addTrack(newTrack, localStreamRef.current!);
+            }
+          });
+        }
+      } catch (err) {
+        console.warn('Could not re-enable camera:', err);
+      }
     }
+
     setCallState((prev) => ({
       ...prev,
       isCameraOff: nextCameraOff,
-      localParticipant: { ...prev.localParticipant, isCameraOff: nextCameraOff },
+      localParticipant: {
+        ...prev.localParticipant,
+        isCameraOff: nextCameraOff,
+        stream: localStreamRef.current,
+      },
     }));
 
     if (socket?.connected) {
