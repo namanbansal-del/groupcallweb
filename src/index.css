@@ -27,9 +27,11 @@
   padding: 0;
 }
 
-html, body, #root {
+html, body, #root, .app-root {
   width: 100%;
   height: 100%;
+  height: 100dvh;
+  min-height: -webkit-fill-available;
   font-family: var(--font-family);
   background-color: var(--bg-app);
   color: var(--text-primary);
@@ -423,15 +425,18 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   width: 100vw;
-  height: 100vh;
+  height: 100%;
+  height: 100dvh;
+  min-height: -webkit-fill-available;
   background: var(--bg-app);
   position: relative;
   overflow: hidden;
 }
 
 .call-header {
-  height: 60px;
-  padding: 0 24px;
+  flex-shrink: 0;
+  height: 56px;
+  padding: 0 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -516,12 +521,14 @@ html, body, #root {
 
 /* ── Main Stage Area ───────────────────────────────────────────────────── */
 .call-stage-area {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px 24px;
+  padding: 12px 16px;
   overflow: hidden;
 }
 
@@ -919,11 +926,12 @@ html, body, #root {
 
 /* ── Pagination Bar ────────────────────────────────────────────────────── */
 .pagination-bar-wrap {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding: 10px 0;
+  gap: 12px;
+  padding: 6px 12px;
   background: var(--bg-card);
   border-top: 1px solid var(--border-card);
 }
@@ -981,19 +989,26 @@ html, body, #root {
 
 /* ── Floating Footer Dock ──────────────────────────────────────────────── */
 .call-footer-dock {
-  height: 76px;
+  flex-shrink: 0;
+  min-height: 68px;
   background: var(--bg-card);
   border-top: 1px solid var(--border-card);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 10;
+  padding: 6px 12px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+  z-index: 30;
+  width: 100%;
 }
 
 .dock-container {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 580px;
 }
 
 .dock-btn {
@@ -1001,15 +1016,19 @@ html, body, #root {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  min-width: 64px;
-  padding: 8px 12px;
+  gap: 3px;
+  flex: 1 1 0;
+  min-width: 48px;
+  max-width: 76px;
+  padding: 7px 4px;
   border-radius: 12px;
   border: 1px solid transparent;
   background: var(--bg-card-secondary);
   color: var(--text-primary);
   cursor: pointer;
   transition: all 0.15s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .dock-btn:hover {
@@ -1241,4 +1260,188 @@ html, body, #root {
 .icon-badge-hand {
   color: var(--hand-raised);
 }
+
+/* ── Mobile and Tablet Responsiveness ───────────────────────────────────── */
+@media (max-width: 768px) {
+  .call-header {
+    height: 50px;
+    padding: 0 12px;
+  }
+
+  .room-name {
+    font-size: 14px;
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .room-timer {
+    font-size: 11px;
+    padding: 2px 6px;
+  }
+
+  .btn-header-tool {
+    padding: 5px 8px;
+    font-size: 12px;
+    border-radius: 8px;
+  }
+
+  .hand-raise-alert {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .single-user-banner {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .call-stage-area {
+    padding: 6px 8px;
+  }
+
+  /* Responsive Grid Layouts for mobile/tablet portrait */
+  .web-video-grid {
+    gap: 8px;
+    padding: 4px 0;
+  }
+
+  .web-video-grid.grid-count-2 {
+    grid-template-columns: 1fr;
+    grid-template-rows: repeat(2, 1fr);
+  }
+
+  .web-video-grid.grid-count-3,
+  .web-video-grid.grid-count-4 {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+  }
+
+  .web-video-grid.grid-count-5,
+  .web-video-grid.grid-count-6 {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+  }
+
+  .video-tile-wrap {
+    border-radius: 12px;
+  }
+
+  .video-badges-top {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    gap: 4px;
+  }
+
+  .badge-hand, .badge-screen {
+    font-size: 10px;
+    padding: 3px 6px;
+  }
+
+  .video-info-pill {
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  .avatar-circle-lg {
+    width: 60px;
+    height: 60px;
+    font-size: 22px;
+  }
+
+  .carousel-arrow {
+    width: 32px;
+    height: 32px;
+  }
+
+  .arrow-left {
+    left: 4px;
+  }
+
+  .arrow-right {
+    right: 4px;
+  }
+
+  .pagination-bar-wrap {
+    padding: 4px 8px;
+    gap: 8px;
+  }
+
+  .page-indicator-text {
+    font-size: 11px;
+  }
+
+  .page-dot {
+    width: 6px;
+    height: 6px;
+  }
+
+  .page-dot-active {
+    width: 14px;
+  }
+
+  .call-footer-dock {
+    min-height: 60px;
+    padding: 5px 8px;
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+  }
+
+  .dock-container {
+    gap: 6px;
+  }
+
+  .dock-btn {
+    min-width: 44px;
+    padding: 6px 2px;
+    border-radius: 10px;
+  }
+
+  .dock-btn-label {
+    font-size: 10px;
+  }
+
+  .drawer-panel {
+    max-width: 100%;
+  }
+
+  .lobby-card {
+    padding: 24px 18px;
+    border-radius: 18px;
+  }
+
+  .lobby-title {
+    font-size: 20px;
+  }
+}
+
+@media (max-width: 420px) {
+  .call-header {
+    height: 46px;
+    padding: 0 8px;
+  }
+
+  .call-header-right {
+    gap: 6px;
+  }
+
+  .room-name {
+    max-width: 90px;
+  }
+
+  .dock-btn {
+    min-width: 36px;
+    padding: 5px 1px;
+    gap: 2px;
+  }
+
+  .dock-btn-label {
+    font-size: 9px;
+  }
+}
+
 
