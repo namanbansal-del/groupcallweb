@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Search, Mic, MicOff, Video, VideoOff, Hand } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { X, Search, Mic, MicOff, Video, VideoOff, Hand, Edit2 } from 'lucide-react';
 import type { Participant } from '../types';
 
 interface ParticipantsDrawerProps {
@@ -7,6 +7,7 @@ interface ParticipantsDrawerProps {
   onClose: () => void;
   participants: Participant[];
   localParticipant: Participant;
+  onOpenRename?: () => void;
 }
 
 export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
@@ -14,12 +15,33 @@ export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
   onClose,
   participants,
   localParticipant,
+  onOpenRename,
 }) => {
   const [search, setSearch] = useState('');
 
+  const allUsers = useMemo(() => {
+    const localId = localParticipant.id;
+    const seenIds = new Set<string>([localId]);
+    if (localParticipant.socketId) seenIds.add(localParticipant.socketId);
+    if (localParticipant.userId) seenIds.add(localParticipant.userId);
+
+    const dedupedRemotes: Participant[] = [];
+    for (const p of participants) {
+      if (!p || !p.id) continue;
+      if (seenIds.has(p.id)) continue;
+      if (p.socketId && seenIds.has(p.socketId)) continue;
+      if (p.userId && seenIds.has(p.userId)) continue;
+
+      seenIds.add(p.id);
+      if (p.socketId) seenIds.add(p.socketId);
+      if (p.userId) seenIds.add(p.userId);
+      dedupedRemotes.push(p);
+    }
+    return [localParticipant, ...dedupedRemotes];
+  }, [localParticipant, participants]);
+
   if (!isOpen) return null;
 
-  const allUsers = [localParticipant, ...participants];
   const filtered = allUsers.filter((p) =>
     p.name.toLowerCase().includes(search.toLowerCase()),
   );
@@ -63,7 +85,10 @@ export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
             <div className="drawer-empty">No participants match "{search}"</div>
           ) : (
             filtered.map((p) => {
-              const isLocal = p.id === localParticipant.id;
+              const isLocal =
+                p.id === localParticipant.id ||
+                (p.socketId && p.socketId === localParticipant.socketId) ||
+                (p.userId && p.userId === localParticipant.userId);
               const initial = p.name ? p.name.slice(0, 1).toUpperCase() : '?';
 
               return (
@@ -74,7 +99,30 @@ export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
                     </div>
                     <div>
                       <div className="participant-row-name">
-                        {p.name} {isLocal && <span className="tag-you">(You)</span>}
+                        <span>{p.name}</span>
+                        {isLocal && (
+                          <>
+                            <span className="tag-you">(You)</span>
+                            {onOpenRename && (
+                              <button
+                                type="button"
+                                onClick={onOpenRename}
+                                title="Change name"
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  padding: '2px',
+                                  color: '#64748B',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                }}
+                              >
+                                <Edit2 size={12} />
+                              </button>
+                            )}
+                          </>
+                        )}
                         {p.isHost && <span className="tag-host">Host</span>}
                       </div>
                       <div className="participant-row-status">
@@ -126,4 +174,3 @@ export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
     </div>
   );
 };
-

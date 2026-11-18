@@ -22,21 +22,21 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
     }
   }, [stream, isCameraOff]);
 
-  const showVideo = stream && !isCameraOff;
+  const showVideo = !!(stream && !isCameraOff);
 
   return (
     <div
       className={`video-tile-wrap ${isSpeaking && !isMuted ? 'speaking-active' : ''}`}
     >
-      {showVideo ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted={isLocal}
-          className={`video-elem ${isLocal && !isScreenSharing ? 'video-mirrored' : ''}`}
-        />
-      ) : (
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted={true}
+        className={`video-elem ${isLocal && !isScreenSharing ? 'video-mirrored' : ''}`}
+        style={{ display: showVideo ? 'block' : 'none' }}
+      />
+      {!showVideo && (
         <div className="video-avatar-fallback">
           <div className={`avatar-circle-lg ${isSpeaking && !isMuted ? 'speaking-ring' : ''}`}>
             <span>{initial}</span>

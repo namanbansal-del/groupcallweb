@@ -10,12 +10,17 @@ import {
   Users,
   ChevronLeft,
   ChevronRight,
+  User,
+  Edit2,
+  Check,
+  X,
 } from 'lucide-react';
 import type { Participant } from '../types';
 import { useWebGroupCall } from '../hooks/useWebGroupCall';
 import { ParticipantVideoTile } from './ParticipantVideoTile';
 import { ParticipantVoiceCard } from './ParticipantVoiceCard';
 import { ParticipantsDrawer } from './ParticipantsDrawer';
+import { RemoteAudio } from './RemoteAudio';
 
 interface ActiveCallProps {
   call: ReturnType<typeof useWebGroupCall>;
@@ -29,14 +34,18 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
     toggleCamera,
     toggleScreenShare,
     toggleHandRaise,
+    changeName,
     leaveGroupCall,
   } = call;
 
   const [currentPage, setCurrentPage] = useState(0);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [newNameInput, setNewNameInput] = useState('');
 
-  // Group all participants including local user
+  // Group all participants with bulletproof deduplication
   const allUsers: Participant[] = useMemo(() => {
+    const localId = callState.localParticipant.id;
     const localWithStream: Participant = {
       ...callState.localParticipant,
       stream: localStream,
@@ -46,7 +55,27 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
       isScreenSharing: callState.isScreenSharing,
     };
     const remotes = Array.isArray(callState.participants) ? callState.participants : [];
-    return [localWithStream, ...remotes];
+
+    // Filter out self and deduplicate by ID, socketId, and userId
+    const seenIds = new Set<string>();
+    seenIds.add(localId);
+    if (callState.localParticipant.socketId) seenIds.add(callState.localParticipant.socketId);
+    if (callState.localParticipant.userId) seenIds.add(callState.localParticipant.userId);
+
+    const dedupedRemotes: Participant[] = [];
+    for (const r of remotes) {
+      if (!r || !r.id) continue;
+      if (seenIds.has(r.id)) continue;
+      if (r.socketId && seenIds.has(r.socketId)) continue;
+      if (r.userId && seenIds.has(r.userId)) continue;
+
+      seenIds.add(r.id);
+      if (r.socketId) seenIds.add(r.socketId);
+      if (r.userId) seenIds.add(r.userId);
+      dedupedRemotes.push(r);
+    }
+
+    return [localWithStream, ...dedupedRemotes];
   }, [
     callState.localParticipant,
     localStream,
@@ -84,8 +113,40 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
 
   const handRaisers = allUsers.filter((u) => u.isHandRaised);
 
+  const handleOpenRename = () => {
+    setNewNameInput(callState.localParticipant.name);
+    setIsEditingName(true);
+  };
+
+  const handleSaveRename = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newNameInput.trim();
+    if (trimmed) {
+      changeName(trimmed);
+      try {
+        localStorage.setItem('groupcall_user_name', trimmed);
+      } catch {}
+    }
+    setIsEditingName(false);
+  };
+
   return (
     <div className="active-call-layout">
+      {/* Global persistent audio playback for all remote participants */}
+      {/* This ensures audio from participants on ANY page is audible and does NOT mute when video is stopped */}
+      <div className="global-audio-tracks" style={{ display: 'none' }} aria-hidden="true">
+        {callState.participants.map((p) => {
+          if (!p.stream || p.id === callState.localParticipant.id) return null;
+          return (
+            <RemoteAudio
+              key={`remote-audio-${p.id}`}
+              stream={p.stream}
+              isMuted={p.isMuted}
+            />
+          );
+        })}
+      </div>
+
       {/* Top Navigation Bar */}
       <header className="call-header">
         <div className="call-header-left">
@@ -96,6 +157,20 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         </div>
 
         <div className="call-header-right">
+          {/* Change Display Name Button */}
+          <button
+            type="button"
+            className="btn-header-tool"
+            onClick={handleOpenRename}
+            title="Change Your Display Name"
+          >
+            <User size={15} />
+            <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {callState.localParticipant.name}
+            </span>
+            <Edit2 size={12} color="#64748B" />
+          </button>
+
           {/* Participant Drawer Button */}
           <button
             type="button"
@@ -328,8 +403,65 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         onClose={() => setIsDrawerOpen(false)}
         participants={callState.participants}
         localParticipant={callState.localParticipant}
+        onOpenRename={handleOpenRename}
       />
+
+      {/* Change Name Modal Dialog */}
+      {isEditingName && (
+        <div className="drawer-overlay" style={{ zIndex: 100 }} onClick={() => setIsEditingName(false)}>
+          <div
+            className="lobby-card"
+            style={{ maxWidth: '420px', margin: 'auto', padding: '24px', position: 'relative' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="drawer-close-btn"
+              style={{ position: 'absolute', top: '16px', right: '16px' }}
+              onClick={() => setIsEditingName(false)}
+              aria-label="Close"
+            >
+              <X size={20} />
+            </button>
+            <h2 style={{ fontSize: '18px', fontWeight: 800, marginBottom: '6px' }}>Change Display Name</h2>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '18px' }}>
+              Your new name will be visible to all participants in this meeting.
+            </p>
+            <form onSubmit={handleSaveRename}>
+              <div className="form-group">
+                <label className="form-label" htmlFor="renameInput">Display Name</label>
+                <input
+                  id="renameInput"
+                  type="text"
+                  className="form-input"
+                  value={newNameInput}
+                  onChange={(e) => setNewNameInput(e.target.value)}
+                  placeholder="Enter your name"
+                  autoFocus
+                  required
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '20px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="page-step-btn"
+                  onClick={() => setIsEditingName(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="join-submit-btn"
+                  style={{ width: 'auto', padding: '10px 20px' }}
+                >
+                  <Check size={16} />
+                  <span>Save Name</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-

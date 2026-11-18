@@ -17,10 +17,13 @@ export function App() {
     );
   });
 
-  const [currentUser, setCurrentUser] = useState(() => ({
-    id: `web_user_${Math.floor(1000 + Math.random() * 9000)}`,
-    name: 'Alex Johnson',
-  }));
+  const [currentUser, setCurrentUser] = useState(() => {
+    const savedName = localStorage.getItem('groupcall_user_name');
+    return {
+      id: `web_user_${Math.floor(1000 + Math.random() * 9000)}`,
+      name: savedName || 'Alex Johnson',
+    };
+  });
 
   const [isSocketConnected, setIsSocketConnected] = useState(false);
 
@@ -70,8 +73,12 @@ export function App() {
   };
 
   const handleJoin = async (roomId: string, name: string, mode: CallMode) => {
-    setCurrentUser((prev) => ({ ...prev, name }));
-    await call.joinGroupCall(roomId, mode);
+    const finalName = name.trim() || currentUser.name;
+    setCurrentUser((prev) => ({ ...prev, name: finalName }));
+    try {
+      localStorage.setItem('groupcall_user_name', finalName);
+    } catch {}
+    await call.joinGroupCall(roomId, mode, finalName);
   };
 
   const isInCall =
@@ -95,4 +102,3 @@ export function App() {
 }
 
 export default App;
-

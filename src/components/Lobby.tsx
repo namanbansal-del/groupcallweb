@@ -29,6 +29,12 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [customServerUrl, setCustomServerUrl] = useState(serverUrl);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
+  useEffect(() => {
+    if (defaultName) {
+      setName(defaultName);
+    }
+  }, [defaultName]);
+
   // Initialize camera preview
   useEffect(() => {
     let active = true;

@@ -20,6 +20,8 @@ export function useWebGroupCall({
 }) {
   const initialLocal: Participant = {
     id: currentUser.id,
+    socketId: socket?.id || currentUser.id,
+    userId: currentUser.id,
     name: currentUser.name,
     avatar: currentUser.avatar,
     isMuted: false,
@@ -61,6 +63,79 @@ export function useWebGroupCall({
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  // ── Helper to upsert a participant into the list safely without duplicates ──
+  const upsertParticipant = useCallback(
+    (
+      list: Participant[],
+      info: {
+        id: string;
+        socketId?: string;
+        userId?: string;
+        name: string;
+        isMuted?: boolean;
+        isCameraOff?: boolean;
+        isHandRaised?: boolean;
+        stream?: MediaStream | null;
+      }
+    ): Participant[] => {
+      const myUserId = currentUser.id;
+      const mySocketId = socket?.id;
+      const primaryId = info.id || info.socketId || info.userId;
+      if (!primaryId) return list;
+
+      // Never add self as a remote participant
+      if (
+        primaryId === myUserId ||
+        primaryId === mySocketId ||
+        info.socketId === mySocketId ||
+        info.userId === myUserId
+      ) {
+        return list;
+      }
+
+      const index = list.findIndex(
+        (p) =>
+          p.id === primaryId ||
+          (info.socketId && (p.socketId === info.socketId || p.id === info.socketId)) ||
+          (info.userId && (p.userId === info.userId || p.id === info.userId))
+      );
+
+      if (index >= 0) {
+        const existing = list[index];
+        const updated = [...list];
+        updated[index] = {
+          ...existing,
+          name: info.name || existing.name,
+          socketId: info.socketId || existing.socketId,
+          userId: info.userId || existing.userId,
+          isMuted: typeof info.isMuted === 'boolean' ? info.isMuted : existing.isMuted,
+          isCameraOff: typeof info.isCameraOff === 'boolean' ? info.isCameraOff : existing.isCameraOff,
+          isHandRaised: typeof info.isHandRaised === 'boolean' ? info.isHandRaised : existing.isHandRaised,
+          stream: info.stream !== undefined ? info.stream : existing.stream,
+        };
+        return updated;
+      }
+
+      return [
+        ...list,
+        {
+          id: primaryId,
+          socketId: info.socketId || primaryId,
+          userId: info.userId || primaryId,
+          name: info.name || `User_${primaryId.slice(0, 4)}`,
+          isMuted: info.isMuted ?? false,
+          isCameraOff: info.isCameraOff ?? false,
+          isSpeaking: false,
+          isHandRaised: info.isHandRaised ?? false,
+          isScreenSharing: false,
+          isHost: false,
+          stream: info.stream || null,
+        },
+      ];
+    },
+    [currentUser.id, socket?.id]
+  );
 
   // ── Fetch ICE Config from REST Endpoint (/api/webrtc/config) ─────
   useEffect(() => {
@@ -135,6 +210,10 @@ export function useWebGroupCall({
   // ── Create Peer Connection for a Remote Peer (socketId) ───────────
   const createPeer = useCallback(
     async (remoteSocketId: string, _remoteUserName?: string, isInitiator: boolean = false) => {
+      if (!remoteSocketId || remoteSocketId === socket?.id || remoteSocketId === currentUser.id) {
+        return null as any;
+      }
+
       if (peersRef.current.has(remoteSocketId)) {
         return peersRef.current.get(remoteSocketId)!;
       }
@@ -151,15 +230,16 @@ export function useWebGroupCall({
       // Relay ICE candidates
       pc.onicecandidate = (event) => {
         if (event.candidate && socket?.connected) {
+          const candidateData = event.candidate.toJSON();
           socket.emit('ice-candidate', {
             to: remoteSocketId,
-            candidate: event.candidate.toJSON(),
+            candidate: candidateData,
           });
           // Backward-compatible alias
           socket.emit('peer:ice-candidate', {
             roomId: stateRef.current.roomId,
             targetUserId: remoteSocketId,
-            candidate: event.candidate.toJSON(),
+            candidate: candidateData,
           });
         }
       };
@@ -180,7 +260,7 @@ export function useWebGroupCall({
         setCallState((prev) => ({
           ...prev,
           participants: prev.participants.map((p) =>
-            p.id === remoteSocketId ? { ...p, stream } : p,
+            p.id === remoteSocketId || p.socketId === remoteSocketId ? { ...p, stream } : p
           ),
         }));
       };
@@ -194,12 +274,10 @@ export function useWebGroupCall({
           await pc.setLocalDescription(offer);
 
           const offerData = { type: offer.type, sdp: offer.sdp };
-          // Standard guide event
           socket?.emit('offer', {
             to: remoteSocketId,
             offer: offerData,
           });
-          // Backward-compatible alias
           socket?.emit('peer:offer', {
             roomId: stateRef.current.roomId,
             targetUserId: remoteSocketId,
@@ -212,13 +290,14 @@ export function useWebGroupCall({
 
       return pc;
     },
-    [iceConfig, socket],
+    [currentUser.id, iceConfig, socket]
   );
 
   // ── Join Group Call ──────────────────────────────────────────────
   const joinGroupCall = useCallback(
-    async (roomId: string, mode: CallMode = 'video') => {
+    async (roomId: string, mode: CallMode = 'video', userName?: string) => {
       const roomCode = roomId.trim().toUpperCase() || 'TEST-ROOM';
+      const effectiveName = (userName || currentUser.name || 'Alex Johnson').trim();
 
       try {
         setCallState((prev) => ({
@@ -229,7 +308,9 @@ export function useWebGroupCall({
           error: null,
           localParticipant: {
             ...prev.localParticipant,
-            name: currentUser.name,
+            name: effectiveName,
+            socketId: socket?.id || currentUser.id,
+            userId: currentUser.id,
           },
         }));
 
@@ -267,6 +348,7 @@ export function useWebGroupCall({
           status: 'joined',
           localParticipant: {
             ...prev.localParticipant,
+            name: effectiveName,
             stream,
             isMuted: false,
             isCameraOff: mode === 'audio',
@@ -279,14 +361,14 @@ export function useWebGroupCall({
             'join-room',
             {
               roomCode,
-              userName: currentUser.name,
+              userName: effectiveName,
               userId: currentUser.id,
             },
             (ack: any) => {
               if (ack) {
                 console.log(`[Web] Joined '${ack.roomCode}'. Total: ${ack.totalUsers}`);
               }
-            },
+            }
           );
 
           // Backward-compatible alias
@@ -294,7 +376,7 @@ export function useWebGroupCall({
             roomId: roomCode,
             user: {
               id: currentUser.id,
-              name: currentUser.name,
+              name: effectiveName,
               avatar: currentUser.avatar,
               isMuted: false,
               isCameraOff: mode === 'audio',
@@ -310,7 +392,35 @@ export function useWebGroupCall({
         }));
       }
     },
-    [currentUser, socket, setupAudioDetection],
+    [currentUser, socket, setupAudioDetection]
+  );
+
+  // ── Change Display Name ──────────────────────────────────────────
+  const changeName = useCallback(
+    (newName: string) => {
+      const trimmed = newName.trim();
+      if (!trimmed) return;
+
+      setCallState((prev) => ({
+        ...prev,
+        localParticipant: { ...prev.localParticipant, name: trimmed },
+      }));
+
+      if (socket?.connected) {
+        const payload = {
+          userName: trimmed,
+          name: trimmed,
+          userId: currentUser.id,
+          socketId: socket.id,
+          roomId: stateRef.current.roomId,
+          roomCode: stateRef.current.roomId,
+        };
+        socket.emit('change-name', payload);
+        socket.emit('peer:name-change', payload);
+        socket.emit('user:update-name', payload);
+      }
+    },
+    [currentUser.id, socket]
   );
 
   // ── Cleanup ──────────────────────────────────────────────────────
@@ -346,9 +456,7 @@ export function useWebGroupCall({
   // ── Leave Group Call ─────────────────────────────────────────────
   const leaveGroupCall = useCallback(() => {
     if (socket?.connected) {
-      // Standard guide event
       socket.emit('leave-room');
-      // Backward-compatible alias
       if (stateRef.current.roomId) {
         socket.emit('room:leave', {
           roomId: stateRef.current.roomId,
@@ -384,7 +492,6 @@ export function useWebGroupCall({
     }));
 
     if (socket?.connected) {
-      // Standard guide event
       socket.emit('toggle-audio', { enabled: !nextMuted });
     }
   }, [socket]);
@@ -404,7 +511,6 @@ export function useWebGroupCall({
     }));
 
     if (socket?.connected) {
-      // Standard guide event
       socket.emit('toggle-video', { enabled: !nextCameraOff });
     }
   }, [socket]);
@@ -479,71 +585,95 @@ export function useWebGroupCall({
     }));
 
     if (socket?.connected) {
-      socket.emit('peer:hand-raise', { isHandRaised: nextHand });
+      const payload = {
+        roomId: stateRef.current.roomId,
+        roomCode: stateRef.current.roomId,
+        userId: currentUser.id,
+        socketId: socket.id,
+        id: socket.id,
+        isHandRaised: nextHand,
+        enabled: nextHand,
+        raised: nextHand,
+      };
+      socket.emit('peer:hand-raise', payload);
+      socket.emit('hand-raise', payload);
+      socket.emit('raise-hand', payload);
     }
-  }, [socket]);
+  }, [currentUser.id, socket]);
 
   // ── Socket Room Listeners (Frontend Integration Guide Compliant) ─
   useEffect(() => {
     if (!socket) return;
 
     // 1. Peer Discovery: Server sends existing users to joiner
-    const onAllUsers = async ({ users }: { users?: Array<{ socketId: string; userName: string }> } = {}) => {
-      const safeUsers = Array.isArray(users) ? users : [];
-      console.log(`[Web Mesh] Received all-users list with ${safeUsers.length} peers`);
+    const onAllUsers = async (payload: any = {}) => {
+      const rawUsers = Array.isArray(payload?.users)
+        ? payload.users
+        : Array.isArray(payload?.peers)
+        ? payload.peers
+        : Array.isArray(payload)
+        ? payload
+        : [];
+
+      console.log(`[Web Mesh] Received all-users list with ${rawUsers.length} peers`);
 
       setCallState((prev) => {
-        const newParticipants = safeUsers.map((u) => ({
-          id: u.socketId,
-          name: u.userName,
-          isMuted: false,
-          isCameraOff: prev.mode === 'audio',
-          isSpeaking: false,
-          isHandRaised: false,
-          isHost: false,
-          stream: null,
-        }));
-        return { ...prev, participants: newParticipants };
+        let currentList = prev.participants;
+        for (const u of rawUsers) {
+          const uid = u.socketId || u.userId || u.id;
+          if (!uid) continue;
+          currentList = upsertParticipant(currentList, {
+            id: uid,
+            socketId: u.socketId || u.id,
+            userId: u.userId || u.id,
+            name: u.userName || u.name || `User_${uid.slice(0, 4)}`,
+            isMuted: u.isMuted ?? false,
+            isCameraOff: u.isCameraOff ?? (prev.mode === 'audio'),
+            isHandRaised: u.isHandRaised ?? false,
+          });
+        }
+        return { ...prev, participants: currentList };
       });
 
       // Joiner initiates offers to all existing peers
-      for (const user of safeUsers) {
-        if (user?.socketId) {
-          await createPeer(user.socketId, user.userName, true);
+      for (const user of rawUsers) {
+        const targetSocketId = user?.socketId || user?.id;
+        const targetUserId = user?.userId || user?.id;
+        if (
+          targetSocketId &&
+          targetSocketId !== socket.id &&
+          targetSocketId !== currentUser.id &&
+          targetUserId !== currentUser.id
+        ) {
+          await createPeer(targetSocketId, user.userName || user.name, true);
         }
       }
     };
 
     // 2. Peer Discovery: Existing users receive new joiner
-    const onUserConnected = async ({
-      socketId,
-      userName,
-      totalUsers,
-    }: {
-      socketId: string;
-      userName: string;
-      totalUsers?: number;
-    }) => {
-      console.log(`[Web Mesh] user-connected: ${userName} (${socketId}). Total: ${totalUsers}`);
-      setCallState((prev) => {
-        if (prev.participants.some((p) => p.id === socketId)) return prev;
-        return {
-          ...prev,
-          participants: [
-            ...prev.participants,
-            {
-              id: socketId,
-              name: userName,
-              isMuted: false,
-              isCameraOff: prev.mode === 'audio',
-              isSpeaking: false,
-              isHandRaised: false,
-              isHost: false,
-              stream: null,
-            },
-          ],
-        };
-      });
+    const onUserConnected = async (payload: any = {}) => {
+      const socketId = payload.socketId || payload.id || payload.user?.id;
+      const userId = payload.userId || payload.user?.userId || payload.user?.id || socketId;
+      const userName = payload.userName || payload.user?.name || `User_${(socketId || '').slice(0, 4)}`;
+
+      if (!socketId) return;
+      if (socketId === socket.id || socketId === currentUser.id || userId === currentUser.id) {
+        return; // Ignore self
+      }
+
+      console.log(`[Web Mesh] user-connected: ${userName} (${socketId}). Total: ${payload.totalUsers}`);
+
+      setCallState((prev) => ({
+        ...prev,
+        participants: upsertParticipant(prev.participants, {
+          id: socketId,
+          socketId,
+          userId,
+          name: userName,
+          isCameraOff: prev.mode === 'audio',
+        }),
+      }));
+
       // Existing peer prepares connection and waits for the new joiner's offer
       await createPeer(socketId, userName, false);
     };
@@ -552,9 +682,11 @@ export function useWebGroupCall({
     const onOffer = async ({ from, offer, sdp, senderId }: { from?: string; offer?: any; sdp?: any; senderId?: string }) => {
       const peerId = from || senderId;
       const remoteOffer = offer || sdp;
-      if (!peerId || !remoteOffer) return;
+      if (!peerId || !remoteOffer || peerId === socket.id || peerId === currentUser.id) return;
 
       const pc = await createPeer(peerId, `User_${peerId.slice(0, 4)}`, false);
+      if (!pc) return;
+
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(remoteOffer));
         const answer = await pc.createAnswer();
@@ -565,7 +697,6 @@ export function useWebGroupCall({
           to: peerId,
           answer: answerData,
         });
-        // Backward-compatible alias
         socket.emit('peer:answer', {
           roomId: stateRef.current.roomId,
           targetUserId: peerId,
@@ -608,99 +739,175 @@ export function useWebGroupCall({
     };
 
     // 6. User Disconnected / Left
-    const onUserDisconnected = ({ socketId, userId, userName: _userName }: { socketId?: string; userId?: string; userName?: string }) => {
-      const peerId = socketId || userId;
+    const onUserDisconnected = (payload: any = {}) => {
+      const peerId = payload.socketId || payload.userId || payload.id;
       if (!peerId) return;
 
-      const pc = peersRef.current.get(peerId);
-      if (pc) {
-        pc.close();
-        peersRef.current.delete(peerId);
-        peerStreamsRef.current.delete(peerId);
+      for (const [key, pc] of peersRef.current.entries()) {
+        if (key === peerId || key === payload.socketId || key === payload.userId) {
+          pc.close();
+          peersRef.current.delete(key);
+          peerStreamsRef.current.delete(key);
+        }
       }
 
       setCallState((prev) => ({
         ...prev,
-        participants: prev.participants.filter((p) => p.id !== peerId),
+        participants: prev.participants.filter(
+          (p) =>
+            p.id !== peerId &&
+            p.socketId !== peerId &&
+            p.userId !== peerId &&
+            (!payload.socketId || p.socketId !== payload.socketId) &&
+            (!payload.userId || p.userId !== payload.userId)
+        ),
       }));
     };
 
     // 7. Peer Media Toggles
-    const onPeerToggleAudio = ({ socketId, enabled }: { socketId: string; enabled: boolean }) => {
+    const onPeerToggleAudio = ({ socketId, userId, id, enabled }: any) => {
+      const peerId = socketId || userId || id;
+      if (!peerId) return;
       setCallState((prev) => ({
         ...prev,
         participants: prev.participants.map((p) =>
-          p.id === socketId ? { ...p, isMuted: !enabled } : p,
+          p.id === peerId || p.socketId === peerId || p.userId === peerId
+            ? { ...p, isMuted: !enabled }
+            : p
         ),
       }));
     };
 
-    const onPeerToggleVideo = ({ socketId, enabled }: { socketId: string; enabled: boolean }) => {
+    const onPeerToggleVideo = ({ socketId, userId, id, enabled }: any) => {
+      const peerId = socketId || userId || id;
+      if (!peerId) return;
       setCallState((prev) => ({
         ...prev,
         participants: prev.participants.map((p) =>
-          p.id === socketId ? { ...p, isCameraOff: !enabled } : p,
+          p.id === peerId || p.socketId === peerId || p.userId === peerId
+            ? { ...p, isCameraOff: !enabled }
+            : p
         ),
       }));
     };
 
-    const onPeerHandRaise = ({ socketId, userId, isHandRaised }: { socketId?: string; userId?: string; isHandRaised: boolean }) => {
-      const peerId = socketId || userId;
+    // 8. Hand Raise Listener
+    const onPeerHandRaise = (payload: any = {}) => {
+      const peerId = payload.socketId || payload.userId || payload.id || payload.user?.id;
+      if (!peerId) return;
+
+      const isHandRaised =
+        typeof payload.isHandRaised === 'boolean'
+          ? payload.isHandRaised
+          : typeof payload.enabled === 'boolean'
+          ? payload.enabled
+          : typeof payload.raised === 'boolean'
+          ? payload.raised
+          : true;
+
       setCallState((prev) => ({
         ...prev,
-        participants: prev.participants.map((p) =>
-          p.id === peerId ? { ...p, isHandRaised } : p,
-        ),
+        participants: prev.participants.map((p) => {
+          const match =
+            p.id === peerId ||
+            p.socketId === peerId ||
+            p.userId === peerId ||
+            (payload.socketId && p.socketId === payload.socketId) ||
+            (payload.userId && p.userId === payload.userId) ||
+            (payload.id && p.id === payload.id);
+          return match ? { ...p, isHandRaised } : p;
+        }),
       }));
     };
 
-    // Register standard guide events
+    // 9. Display Name Change Listener
+    const onPeerNameChange = (payload: any = {}) => {
+      const peerId = payload.socketId || payload.userId || payload.id;
+      const updatedName = payload.userName || payload.name;
+      if (!peerId || !updatedName) return;
+
+      setCallState((prev) => ({
+        ...prev,
+        participants: prev.participants.map((p) => {
+          const match =
+            p.id === peerId ||
+            p.socketId === peerId ||
+            p.userId === peerId ||
+            (payload.socketId && p.socketId === payload.socketId) ||
+            (payload.userId && p.userId === payload.userId);
+          return match ? { ...p, name: updatedName } : p;
+        }),
+      }));
+    };
+
+    // Register standard and compatible socket events
     socket.on('all-users', onAllUsers);
-    socket.on('user-connected', onUserConnected);
-    socket.on('offer', onOffer);
-    socket.on('answer', onAnswer);
-    socket.on('ice-candidate', onIceCandidate);
-    socket.on('user-disconnected', onUserDisconnected);
-    socket.on('peer:toggle-audio', onPeerToggleAudio);
-    socket.on('peer:toggle-video', onPeerToggleVideo);
-    socket.on('peer:hand-raise', onPeerHandRaise);
-
-    // Backward-compatible aliases
     socket.on('room:peers', onAllUsers);
+
+    socket.on('user-connected', onUserConnected);
     socket.on('peer:joined', ({ user }: any) => {
-      if (user?.id) onUserConnected({ socketId: user.id, userName: user.name });
+      if (user?.id) onUserConnected({ socketId: user.id, userName: user.name, userId: user.id });
     });
-    socket.on('peer:left', ({ userId, socketId }: any) => {
-      onUserDisconnected({ socketId: socketId || userId });
-    });
+
+    socket.on('offer', onOffer);
     socket.on('peer:offer', onOffer);
+
+    socket.on('answer', onAnswer);
     socket.on('peer:answer', onAnswer);
+
+    socket.on('ice-candidate', onIceCandidate);
     socket.on('peer:ice-candidate', onIceCandidate);
+
+    socket.on('user-disconnected', onUserDisconnected);
+    socket.on('peer:left', ({ userId, socketId }: any) => {
+      onUserDisconnected({ socketId: socketId || userId, userId });
+    });
+
+    socket.on('toggle-audio', onPeerToggleAudio);
+    socket.on('peer:toggle-audio', onPeerToggleAudio);
+
+    socket.on('toggle-video', onPeerToggleVideo);
+    socket.on('peer:toggle-video', onPeerToggleVideo);
+
     socket.on('peer:media-toggle', ({ userId, isMuted, isCameraOff }: any) => {
       if (typeof isMuted === 'boolean') onPeerToggleAudio({ socketId: userId, enabled: !isMuted });
       if (typeof isCameraOff === 'boolean') onPeerToggleVideo({ socketId: userId, enabled: !isCameraOff });
     });
 
+    socket.on('peer:hand-raise', onPeerHandRaise);
+    socket.on('hand-raise', onPeerHandRaise);
+    socket.on('raise-hand', onPeerHandRaise);
+
+    socket.on('peer:name-change', onPeerNameChange);
+    socket.on('change-name', onPeerNameChange);
+    socket.on('user:update-name', onPeerNameChange);
+
     return () => {
       socket.off('all-users', onAllUsers);
-      socket.off('user-connected', onUserConnected);
-      socket.off('offer', onOffer);
-      socket.off('answer', onAnswer);
-      socket.off('ice-candidate', onIceCandidate);
-      socket.off('user-disconnected', onUserDisconnected);
-      socket.off('peer:toggle-audio', onPeerToggleAudio);
-      socket.off('peer:toggle-video', onPeerToggleVideo);
-      socket.off('peer:hand-raise', onPeerHandRaise);
-
       socket.off('room:peers', onAllUsers);
+      socket.off('user-connected', onUserConnected);
       socket.off('peer:joined');
-      socket.off('peer:left');
+      socket.off('offer', onOffer);
       socket.off('peer:offer', onOffer);
+      socket.off('answer', onAnswer);
       socket.off('peer:answer', onAnswer);
+      socket.off('ice-candidate', onIceCandidate);
       socket.off('peer:ice-candidate', onIceCandidate);
+      socket.off('user-disconnected', onUserDisconnected);
+      socket.off('peer:left');
+      socket.off('toggle-audio', onPeerToggleAudio);
+      socket.off('peer:toggle-audio', onPeerToggleAudio);
+      socket.off('toggle-video', onPeerToggleVideo);
+      socket.off('peer:toggle-video', onPeerToggleVideo);
       socket.off('peer:media-toggle');
+      socket.off('peer:hand-raise', onPeerHandRaise);
+      socket.off('hand-raise', onPeerHandRaise);
+      socket.off('raise-hand', onPeerHandRaise);
+      socket.off('peer:name-change', onPeerNameChange);
+      socket.off('change-name', onPeerNameChange);
+      socket.off('user:update-name', onPeerNameChange);
     };
-  }, [createPeer, socket]);
+  }, [createPeer, currentUser.id, socket, upsertParticipant]);
 
   useEffect(() => {
     return () => {
@@ -713,6 +920,7 @@ export function useWebGroupCall({
     localStream,
     joinGroupCall,
     leaveGroupCall,
+    changeName,
     toggleMute,
     toggleCamera,
     toggleScreenShare,

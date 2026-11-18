@@ -4,6 +4,8 @@ export type CallStatus = 'idle' | 'joining' | 'joined' | 'left';
 
 export interface Participant {
   id: string;
+  socketId?: string;
+  userId?: string;
   name: string;
   avatar?: string;
   isMuted: boolean;

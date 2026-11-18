@@ -303,15 +303,65 @@ function registerSocketHandlers(namespace) {
     });
 
     // Hand raise
-    socket.on('peer:hand-raise', ({ isHandRaised }) => {
+    const handleHandRaise = (payload = {}) => {
+      const meta = socketMeta.get(socket.id);
+      const roomCode = meta?.roomCode || payload.roomId || payload.roomCode;
+      if (!roomCode) return;
+
+      const isHandRaised =
+        typeof payload.isHandRaised === 'boolean'
+          ? payload.isHandRaised
+          : typeof payload.enabled === 'boolean'
+          ? payload.enabled
+          : typeof payload.raised === 'boolean'
+          ? payload.raised
+          : true;
+
+      const eventData = {
+        userId: meta?.userId || payload.userId || socket.id,
+        socketId: socket.id,
+        id: socket.id,
+        isHandRaised,
+        enabled: isHandRaised,
+      };
+
+      socket.to(roomCode).emit('peer:hand-raise', eventData);
+      socket.to(roomCode).emit('hand-raise', eventData);
+    };
+
+    socket.on('peer:hand-raise', handleHandRaise);
+    socket.on('hand-raise', handleHandRaise);
+    socket.on('raise-hand', handleHandRaise);
+
+    // Name change
+    const handleNameChange = (payload = {}) => {
+      const newName = (payload.userName || payload.name || '').trim();
+      if (!newName) return;
       const meta = socketMeta.get(socket.id);
       if (!meta) return;
-      socket.to(meta.roomCode).emit('peer:hand-raise', {
-        userId: socket.id,
+
+      meta.userName = newName;
+      const room = rooms.get(meta.roomCode);
+      if (room && room.has(socket.id)) {
+        room.get(socket.id).userName = newName;
+      }
+
+      const eventData = {
+        userId: meta.userId || socket.id,
         socketId: socket.id,
-        isHandRaised,
-      });
-    });
+        id: socket.id,
+        userName: newName,
+        name: newName,
+      };
+
+      socket.to(meta.roomCode).emit('peer:name-change', eventData);
+      socket.to(meta.roomCode).emit('change-name', eventData);
+      console.log(`[Name Change] ${socket.id} changed name to '${newName}' in '${meta.roomCode}'`);
+    };
+
+    socket.on('change-name', handleNameChange);
+    socket.on('peer:name-change', handleNameChange);
+    socket.on('user:update-name', handleNameChange);
 
     // ── 6. LEAVE / DISCONNECT ──────────────────────────────────────
     const handleLeave = () => {
