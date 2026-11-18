@@ -24,7 +24,7 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
     stream.getVideoTracks().some((t) => t.readyState !== 'ended')
   );
 
-  const showVideo = hasLiveVideoTrack && !isCameraOff;
+  const showVideo = hasLiveVideoTrack && (!isCameraOff || isScreenSharing);
 
   useEffect(() => {
     const videoEl = videoRef.current;
@@ -51,6 +51,21 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
       videoEl.srcObject = null;
     }
 
+    const handleLoadedMetadata = () => {
+      if (videoEl && showVideo) {
+        videoEl.play().catch(() => {});
+      }
+    };
+    videoEl.addEventListener('loadedmetadata', handleLoadedMetadata);
+
+    const handleUserInteraction = () => {
+      if (videoEl && videoEl.paused && showVideo) {
+        videoEl.play().catch(() => {});
+      }
+    };
+    window.addEventListener('touchstart', handleUserInteraction, { once: true });
+    window.addEventListener('click', handleUserInteraction, { once: true });
+
     // Listen to video tracks unmuting or ending
     if (stream) {
       const vTracks = stream.getVideoTracks();
@@ -67,13 +82,22 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
       });
 
       return () => {
+        videoEl.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        window.removeEventListener('touchstart', handleUserInteraction);
+        window.removeEventListener('click', handleUserInteraction);
         vTracks.forEach((t) => {
           t.removeEventListener('unmute', onTrackChange);
           t.removeEventListener('ended', onTrackChange);
         });
       };
     }
-  }, [stream, showVideo, isCameraOff]);
+
+    return () => {
+      videoEl.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      window.removeEventListener('touchstart', handleUserInteraction);
+      window.removeEventListener('click', handleUserInteraction);
+    };
+  }, [stream, showVideo, isCameraOff, isScreenSharing]);
 
   return (
     <div
@@ -84,7 +108,9 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
         autoPlay
         playsInline
         muted={true}
-        className={`video-elem ${isLocal && !isScreenSharing ? 'video-mirrored' : ''}`}
+        className={`video-elem ${isLocal && !isScreenSharing ? 'video-mirrored' : ''} ${
+          isScreenSharing ? 'video-screenshare' : ''
+        }`}
         style={{ display: showVideo ? 'block' : 'none' }}
       />
       {!showVideo && (
@@ -107,7 +133,7 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
         {isScreenSharing && (
           <div className="badge-screen">
             <MonitorUp size={14} />
-            <span>Presenting</span>
+            <span>{isLocal ? 'Your Screen' : 'Presenting'}</span>
           </div>
         )}
       </div>

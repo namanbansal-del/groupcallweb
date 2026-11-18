@@ -1444,4 +1444,66 @@ html, body, #root, .app-root {
   }
 }
 
+/* ── Screen Sharing Presenter & Viewer Banners ── */
+.video-elem.video-screenshare {
+  object-fit: contain !important;
+  background: #000000;
+}
+
+.screenshare-presenter-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(90deg, #1E1B4B 0%, #312E81 100%);
+  border-bottom: 1px solid #4338CA;
+  padding: 8px 16px;
+  color: #E0E7FF;
+  font-size: 13px;
+  font-weight: 500;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.presenter-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.presenter-icon {
+  color: #818CF8;
+  flex-shrink: 0;
+}
+
+.btn-stop-share {
+  background: #EF4444;
+  color: #FFFFFF;
+  border: none;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-stop-share:hover {
+  background: #DC2626;
+}
+
+.screenshare-viewer-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1E293B;
+  border-bottom: 1px solid #334155;
+  padding: 8px 16px;
+  color: #CBD5E1;
+  font-size: 13px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+
 

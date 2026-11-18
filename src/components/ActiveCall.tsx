@@ -56,11 +56,17 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
   // Group all participants with bulletproof deduplication and active-stream priority sorting
   const allUsers: Participant[] = useMemo(() => {
     const localId = callState.localParticipant.id;
+    const activeLocalStream =
+      callState.isScreenSharing && callState.localParticipant.stream
+        ? callState.localParticipant.stream
+        : callState.localParticipant.stream || localStream;
+
     const localWithStream: Participant = {
       ...callState.localParticipant,
-      stream: localStream,
+      stream: activeLocalStream,
       isMuted: callState.isMuted,
-      isCameraOff: callState.mode === 'audio' ? true : callState.isCameraOff,
+      isCameraOff:
+        callState.mode === 'audio' ? true : callState.isScreenSharing ? false : callState.isCameraOff,
       isHandRaised: callState.isHandRaised,
       isScreenSharing: callState.isScreenSharing,
     };
@@ -85,8 +91,11 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
       dedupedRemotes.push(r);
     }
 
-    // Prioritize active participants with active media streams or raised hands ahead of idle/ghost participants
+    // Prioritize screen sharers, active streams, and hand-raisers ahead of idle/ghost participants
     dedupedRemotes.sort((a, b) => {
+      // Screen sharer comes first!
+      if (a.isScreenSharing !== b.isScreenSharing) return a.isScreenSharing ? -1 : 1;
+
       const aHasStream = !!(a.stream && a.stream.getTracks().length > 0);
       const bHasStream = !!(b.stream && b.stream.getTracks().length > 0);
       if (aHasStream !== bHasStream) return aHasStream ? -1 : 1;
@@ -99,12 +108,12 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
     return [localWithStream, ...dedupedRemotes];
   }, [
     callState.localParticipant,
+    callState.isScreenSharing,
     localStream,
     callState.isMuted,
     callState.mode,
     callState.isCameraOff,
     callState.isHandRaised,
-    callState.isScreenSharing,
     callState.participants,
   ]);
 
@@ -133,6 +142,9 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
   };
 
   const handRaisers = allUsers.filter((u) => u.isHandRaised);
+  const screenshareUser = allUsers.find(
+    (u) => u.isScreenSharing && u.id !== callState.localParticipant.id
+  );
 
   const handleOpenRename = () => {
     setNewNameInput(callState.localParticipant.name);
@@ -213,6 +225,30 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
           </button>
         </div>
       </header>
+
+      {/* Screen Sharing Status Banners */}
+      {callState.isScreenSharing ? (
+        <div className="screenshare-presenter-banner">
+          <div className="presenter-banner-left">
+            <MonitorUp size={16} className="presenter-icon" />
+            <span>You are presenting your screen to all participants</span>
+          </div>
+          <button
+            type="button"
+            onClick={toggleScreenShare}
+            className="btn-stop-share"
+          >
+            Stop Presenting
+          </button>
+        </div>
+      ) : screenshareUser ? (
+        <div className="screenshare-viewer-banner">
+          <MonitorUp size={16} className="presenter-icon" />
+          <span>
+            <strong>{screenshareUser.name}</strong> is sharing their screen
+          </span>
+        </div>
+      ) : null}
 
       {/* Raised Hands Alert Banner */}
       {handRaisers.length > 0 && (
