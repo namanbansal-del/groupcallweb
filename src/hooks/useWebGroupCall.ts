@@ -959,93 +959,71 @@ export function useWebGroupCall({
         socket.emit('toggle-screen-share', { enabled: false, userId: currentUser.id });
       }
     } else {
-      // Check if getDisplayMedia is supported on this browser/environment
-      if (
-        !navigator.mediaDevices ||
-        typeof navigator.mediaDevices.getDisplayMedia !== 'function'
-      ) {
-        alert(
-          'Screen sharing from mobile is only supported in Safari on iOS 15+ or Chrome on Android. In-app browsers do not permit screen capture.'
-        );
-        return;
-      }
-
-      let screenStream: MediaStream | null = null;
       try {
-        // Use clean standard constraints { video: true } compatible with mobile (iOS Safari / Android) & desktop
-        screenStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            displaySurface: 'monitor',
+          },
+          audio: false,
         });
-      } catch (err: any) {
-        if (err?.name === 'NotAllowedError' || err?.name === 'AbortError') {
-          console.log('[ScreenShare] User canceled screen share prompt');
-          return;
-        }
-        console.warn('[ScreenShare] getDisplayMedia error:', err);
-        alert('Could not start screen sharing: ' + (err?.message || 'Permission denied'));
-        return;
-      }
+        screenStreamRef.current = screenStream;
 
-      if (!screenStream) return;
-      screenStreamRef.current = screenStream;
+        const screenTrack = screenStream.getVideoTracks()[0];
+        screenTrack.onended = () => {
+          toggleScreenShare();
+        };
 
-      const screenTrack = screenStream.getVideoTracks()[0];
-      if (!screenTrack) return;
-
-      screenTrack.onended = () => {
-        toggleScreenShare();
-      };
-
-      // Replace video track with screen track on all peers
-      peersRef.current.forEach((pc) => {
-        const transceivers = pc.getTransceivers();
-        const videoTransceiver = transceivers.find(
-          (t) =>
-            t.sender.track?.kind === 'video' ||
-            t.receiver.track?.kind === 'video' ||
-            t.mid === '1'
-        );
-        if (videoTransceiver && videoTransceiver.sender) {
-          videoTransceiver.direction = 'sendrecv';
-          videoTransceiver.sender.replaceTrack(screenTrack).catch((err) => {
-            console.warn('[ScreenShare] replaceTrack error:', err);
-          });
-        } else {
-          const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
-          if (sender) {
-            sender.replaceTrack(screenTrack).catch((err) => {
+        // Replace video track with screen track on all peers
+        peersRef.current.forEach((pc) => {
+          const transceivers = pc.getTransceivers();
+          const videoTransceiver = transceivers.find(
+            (t) =>
+              t.sender.track?.kind === 'video' ||
+              t.receiver.track?.kind === 'video' ||
+              t.mid === '1'
+          );
+          if (videoTransceiver && videoTransceiver.sender) {
+            videoTransceiver.direction = 'sendrecv';
+            videoTransceiver.sender.replaceTrack(screenTrack).catch((err) => {
               console.warn('[ScreenShare] replaceTrack error:', err);
             });
+          } else {
+            const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+            if (sender) {
+              sender.replaceTrack(screenTrack).catch((err) => {
+                console.warn('[ScreenShare] replaceTrack error:', err);
+              });
+            }
           }
-        }
-      });
+        });
 
-      setCallState((prev) => ({
-        ...prev,
-        isScreenSharing: true,
-        localParticipant: {
-          ...prev.localParticipant,
-          stream: screenStream,
+        setCallState((prev) => ({
+          ...prev,
           isScreenSharing: true,
-          isCameraOff: false,
-        },
-      }));
+          localParticipant: {
+            ...prev.localParticipant,
+            stream: screenStream,
+            isScreenSharing: true,
+            isCameraOff: false,
+          },
+        }));
 
-      // Broadcast screen share started to peers via DataChannel
-      const msg = JSON.stringify({
-        type: 'screen-share',
-        isScreenSharing: true,
-        userId: currentUser.id,
-      });
-      dataChannelsRef.current.forEach((dc) => {
-        if (dc.readyState === 'open') {
-          try {
-            dc.send(msg);
-          } catch (e) {}
+        // Broadcast screen share started to peers via DataChannel
+        const msg = JSON.stringify({
+          type: 'screen-share',
+          isScreenSharing: true,
+          userId: currentUser.id,
+        });
+        dataChannelsRef.current.forEach((dc) => {
+          if (dc.readyState === 'open') {
+            try { dc.send(msg); } catch (e) {}
+          }
+        });
+        if (socket?.connected) {
+          socket.emit('toggle-screen-share', { enabled: true, userId: currentUser.id });
         }
-      });
-      if (socket?.connected) {
-        socket.emit('toggle-screen-share', { enabled: true, userId: currentUser.id });
+      } catch (err) {
+        console.warn('Screen share canceled or failed:', err);
       }
     }
   }, [currentUser.id, socket]);
@@ -1380,31 +1358,6 @@ export function useWebGroupCall({
       if (typeof isCameraOff === 'boolean') onPeerToggleVideo({ socketId: userId, enabled: !isCameraOff });
     });
 
-    // 10. Screen Share Listener (from Socket)
-    const onPeerToggleScreenShare = (payload: any = {}) => {
-      const peerId = payload.socketId || payload.userId || payload.id;
-      if (!peerId) return;
-      const isScreenSharing = typeof payload.enabled === 'boolean' ? payload.enabled : true;
-
-      setCallState((prev) => ({
-        ...prev,
-        participants: prev.participants.map((p) => {
-          const match =
-            p.id === peerId ||
-            p.socketId === peerId ||
-            p.userId === peerId ||
-            (payload.socketId && p.socketId === payload.socketId) ||
-            (payload.userId && p.userId === payload.userId);
-          return match
-            ? { ...p, isScreenSharing, isCameraOff: isScreenSharing ? false : p.isCameraOff }
-            : p;
-        }),
-      }));
-    };
-
-    socket.on('toggle-screen-share', onPeerToggleScreenShare);
-    socket.on('peer:screen-share', onPeerToggleScreenShare);
-
     socket.on('peer:hand-raise', onPeerHandRaise);
     socket.on('hand-raise', onPeerHandRaise);
     socket.on('raise-hand', onPeerHandRaise);
@@ -1431,8 +1384,6 @@ export function useWebGroupCall({
       socket.off('toggle-video', onPeerToggleVideo);
       socket.off('peer:toggle-video', onPeerToggleVideo);
       socket.off('peer:media-toggle');
-      socket.off('toggle-screen-share', onPeerToggleScreenShare);
-      socket.off('peer:screen-share', onPeerToggleScreenShare);
       socket.off('peer:hand-raise', onPeerHandRaise);
       socket.off('hand-raise', onPeerHandRaise);
       socket.off('raise-hand', onPeerHandRaise);
