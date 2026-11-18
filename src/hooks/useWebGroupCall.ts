@@ -3,9 +3,22 @@ import type { CallMode, GroupCallState, Participant } from '../types';
 
 const FALLBACK_ICE_SERVERS: RTCConfiguration = {
   iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
+    {
+      urls: [
+        'stun:13.126.239.227:3478',
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302',
+        'stun:stun2.l.google.com:19302',
+      ],
+    },
+    {
+      urls: [
+        'turn:13.126.239.227:3478?transport=udp',
+        'turn:13.126.239.227:3478?transport=tcp',
+      ],
+      username: 'turnuser',
+      credential: 'techugo@123',
+    },
   ],
 };
 
@@ -50,15 +63,41 @@ export function useWebGroupCall({
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [iceConfig, setIceConfig] = useState<RTCConfiguration>(FALLBACK_ICE_SERVERS);
+  const iceConfigRef = useRef<RTCConfiguration>(FALLBACK_ICE_SERVERS);
+  iceConfigRef.current = iceConfig;
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const peerStreamsRef = useRef<Map<string, MediaStream>>(new Map());
   const dataChannelsRef = useRef<Map<string, RTCDataChannel>>(new Map());
+  const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const timerRef = useRef<number | null>(null);
   const stateRef = useRef(callState);
   stateRef.current = callState;
+
+  // ── ICE Candidate Buffer to prevent race conditions ─────────────
+  const queueCandidate = useCallback((peerId: string, candidate: RTCIceCandidateInit) => {
+    const list = pendingCandidatesRef.current.get(peerId) || [];
+    list.push(candidate);
+    pendingCandidatesRef.current.set(peerId, list);
+    console.log(`[Web Mesh] Queued candidate for peer ${peerId} (count: ${list.length})`);
+  }, []);
+
+  const drainPendingCandidates = useCallback(async (peerId: string, pc: RTCPeerConnection) => {
+    const queued = pendingCandidatesRef.current.get(peerId);
+    if (queued && queued.length > 0) {
+      console.log(`[Web Mesh] Draining ${queued.length} queued ICE candidates for ${peerId}`);
+      for (const cand of queued) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+        } catch (err) {
+          console.warn(`[Web Mesh] Error adding drained candidate for ${peerId}:`, err);
+        }
+      }
+      pendingCandidatesRef.current.delete(peerId);
+    }
+  }, []);
 
   // ── Web Audio Analyser for Speaking Pulse ────────────────────────
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -310,13 +349,38 @@ export function useWebGroupCall({
         return peersRef.current.get(remoteSocketId)!;
       }
 
-      const pc = new RTCPeerConnection(iceConfig);
+      const pc = new RTCPeerConnection(iceConfigRef.current);
       peersRef.current.set(remoteSocketId, pc);
 
+      // Add local media tracks if available
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => {
-          pc.addTrack(track, localStreamRef.current!);
+          try {
+            pc.addTrack(track, localStreamRef.current!);
+          } catch (e) {
+            console.warn('[Web Mesh] Error adding track:', e);
+          }
         });
+      }
+
+      // Ensure transceivers exist for both audio and video with sendrecv direction
+      const transceivers = pc.getTransceivers();
+      const hasAudioTransceiver = transceivers.some(
+        (t) => t.sender.track?.kind === 'audio' || t.receiver.track?.kind === 'audio'
+      );
+      const hasVideoTransceiver = transceivers.some(
+        (t) => t.sender.track?.kind === 'video' || t.receiver.track?.kind === 'video'
+      );
+
+      if (!hasAudioTransceiver) {
+        try {
+          pc.addTransceiver('audio', { direction: 'sendrecv' });
+        } catch (e) {}
+      }
+      if (!hasVideoTransceiver) {
+        try {
+          pc.addTransceiver('video', { direction: 'sendrecv' });
+        } catch (e) {}
       }
 
       // P2P DataChannel setup for real name & hand-raise messaging
@@ -349,25 +413,53 @@ export function useWebGroupCall({
         }
       };
 
-      // Remote stream received
+      // Remote stream received: Create a new MediaStream instance to trigger React re-renders
       pc.ontrack = (event) => {
+        console.log(`[Web Mesh] ontrack from ${remoteSocketId}: kind=${event.track.kind}`);
         let stream = peerStreamsRef.current.get(remoteSocketId);
-        if (event.streams && event.streams[0]) {
-          stream = event.streams[0];
-        } else {
-          if (!stream) stream = new MediaStream();
-          stream.addTrack(event.track);
-        }
-        if (stream) {
-          peerStreamsRef.current.set(remoteSocketId, stream);
+        if (!stream) {
+          stream = new MediaStream();
         }
 
-        setCallState((prev) => ({
-          ...prev,
-          participants: prev.participants.map((p) =>
-            p.id === remoteSocketId || p.socketId === remoteSocketId ? { ...p, stream } : p
-          ),
-        }));
+        if (!stream.getTracks().some((t) => t.id === event.track.id)) {
+          stream.addTrack(event.track);
+        }
+
+        // Create a new reference so React hooks and child components re-render immediately
+        const freshStream = new MediaStream(stream.getTracks());
+        peerStreamsRef.current.set(remoteSocketId, freshStream);
+
+        const hasVideo = freshStream.getVideoTracks().length > 0;
+
+        setCallState((prev) => {
+          const exists = prev.participants.some(
+            (p) => p.id === remoteSocketId || p.socketId === remoteSocketId
+          );
+          if (exists) {
+            return {
+              ...prev,
+              participants: prev.participants.map((p) =>
+                p.id === remoteSocketId || p.socketId === remoteSocketId
+                  ? {
+                      ...p,
+                      stream: freshStream,
+                      isCameraOff: hasVideo ? false : p.isCameraOff,
+                    }
+                  : p
+              ),
+            };
+          }
+          return {
+            ...prev,
+            participants: upsertParticipant(prev.participants, {
+              id: remoteSocketId,
+              socketId: remoteSocketId,
+              name: _remoteUserName || `User_${remoteSocketId.slice(0, 4)}`,
+              stream: freshStream,
+              isCameraOff: !hasVideo,
+            }),
+          };
+        });
       };
 
       if (isInitiator) {
@@ -395,7 +487,7 @@ export function useWebGroupCall({
 
       return pc;
     },
-    [currentUser.id, iceConfig, setupDataChannel, socket]
+    [currentUser.id, setupDataChannel, socket, upsertParticipant]
   );
 
   // ── Join Group Call ──────────────────────────────────────────────
@@ -675,9 +767,18 @@ export function useWebGroupCall({
         });
       }
       peersRef.current.forEach((pc) => {
-        const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
-        if (sender) {
-          sender.replaceTrack(null).catch(() => {});
+        const transceivers = pc.getTransceivers();
+        const videoTransceiver = transceivers.find(
+          (t) =>
+            t.sender.track?.kind === 'video' ||
+            t.receiver.track?.kind === 'video' ||
+            t.mid === '1'
+        );
+        if (videoTransceiver && videoTransceiver.sender) {
+          videoTransceiver.sender.replaceTrack(null).catch(() => {});
+        } else {
+          const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+          if (sender) sender.replaceTrack(null).catch(() => {});
         }
       });
     } else {
@@ -692,12 +793,27 @@ export function useWebGroupCall({
             localStreamRef.current = new MediaStream();
           }
           localStreamRef.current.addTrack(newTrack);
+
           peersRef.current.forEach((pc) => {
-            const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
-            if (sender) {
-              sender.replaceTrack(newTrack).catch(() => {});
+            const transceivers = pc.getTransceivers();
+            const videoTransceiver = transceivers.find(
+              (t) =>
+                t.sender.track?.kind === 'video' ||
+                t.receiver.track?.kind === 'video' ||
+                t.mid === '1'
+            );
+            if (videoTransceiver && videoTransceiver.sender) {
+              videoTransceiver.sender.replaceTrack(newTrack).catch(() => {});
+              videoTransceiver.direction = 'sendrecv';
             } else {
-              pc.addTrack(newTrack, localStreamRef.current!);
+              const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+              if (sender) {
+                sender.replaceTrack(newTrack).catch(() => {});
+              } else {
+                try {
+                  pc.addTrack(newTrack, localStreamRef.current!);
+                } catch (e) {}
+              }
             }
           });
         }
@@ -706,13 +822,17 @@ export function useWebGroupCall({
       }
     }
 
+    const currentLocalStream = localStreamRef.current
+      ? new MediaStream(localStreamRef.current.getTracks())
+      : null;
+
     setCallState((prev) => ({
       ...prev,
       isCameraOff: nextCameraOff,
       localParticipant: {
         ...prev.localParticipant,
         isCameraOff: nextCameraOff,
-        stream: localStreamRef.current,
+        stream: currentLocalStream,
       },
     }));
 
@@ -908,11 +1028,15 @@ export function useWebGroupCall({
       const remoteOffer = offer || sdp;
       if (!peerId || !remoteOffer || peerId === socket.id || peerId === currentUser.id) return;
 
-      const pc = await createPeer(peerId, `User_${peerId.slice(0, 4)}`, false);
+      console.log(`[Web Mesh] Received offer from ${peerId}`);
+      const pc = await createPeer(peerId, undefined, false);
       if (!pc) return;
 
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(remoteOffer));
+        // Drain buffered ICE candidates after setting remote description
+        await drainPendingCandidates(peerId, pc);
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
@@ -937,10 +1061,13 @@ export function useWebGroupCall({
       const remoteAnswer = answer || sdp;
       if (!peerId || !remoteAnswer) return;
 
+      console.log(`[Web Mesh] Received answer from ${peerId}`);
       const pc = peersRef.current.get(peerId);
       if (pc) {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(remoteAnswer));
+          // Drain buffered ICE candidates after setting remote description
+          await drainPendingCandidates(peerId, pc);
         } catch (e) {
           console.error('Error handling answer from peer:', peerId, e);
         }
@@ -953,12 +1080,15 @@ export function useWebGroupCall({
       if (!peerId || !candidate) return;
 
       const pc = peersRef.current.get(peerId);
-      if (pc) {
+      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
         try {
           await pc.addIceCandidate(new RTCIceCandidate(candidate));
         } catch (e) {
           console.warn('Error adding ICE candidate from peer:', peerId, e);
         }
+      } else {
+        // Buffer candidate until remote description is set
+        queueCandidate(peerId, candidate);
       }
     };
 
@@ -1132,7 +1262,7 @@ export function useWebGroupCall({
       socket.off('change-name', onPeerNameChange);
       socket.off('user:update-name', onPeerNameChange);
     };
-  }, [createPeer, currentUser.id, socket, upsertParticipant]);
+  }, [createPeer, currentUser.id, drainPendingCandidates, queueCandidate, socket, upsertParticipant]);
 
   useEffect(() => {
     return () => {

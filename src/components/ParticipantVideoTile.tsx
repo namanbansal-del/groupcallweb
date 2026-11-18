@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { MicOff, Hand, MonitorUp } from 'lucide-react';
 import type { Participant } from '../types';
 
@@ -15,14 +15,65 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
     participant;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const initial = name ? name.slice(0, 1).toUpperCase() : '?';
+  const [, setTrackVersion] = useState(0);
+
+  // Check if live video tracks actually exist on this stream
+  const hasLiveVideoTrack = !!(
+    stream &&
+    stream.getVideoTracks().length > 0 &&
+    stream.getVideoTracks().some((t) => t.readyState !== 'ended')
+  );
+
+  const showVideo = hasLiveVideoTrack && !isCameraOff;
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-    }
-  }, [stream, isCameraOff]);
+    const videoEl = videoRef.current;
+    if (!videoEl) return;
 
-  const showVideo = !!(stream && !isCameraOff);
+    // Strict mobile / Safari inline autoplay compliance
+    videoEl.muted = true;
+    videoEl.defaultMuted = true;
+    videoEl.playsInline = true;
+    videoEl.setAttribute('playsinline', 'true');
+    videoEl.setAttribute('webkit-playsinline', 'true');
+
+    if (stream && showVideo) {
+      if (videoEl.srcObject !== stream) {
+        videoEl.srcObject = stream;
+      }
+      const playPromise = videoEl.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn('[ParticipantVideoTile] play() error:', err?.message || err);
+        });
+      }
+    } else {
+      videoEl.srcObject = null;
+    }
+
+    // Listen to video tracks unmuting or ending
+    if (stream) {
+      const vTracks = stream.getVideoTracks();
+      const onTrackChange = () => {
+        setTrackVersion((v) => v + 1);
+        if (videoEl && videoEl.paused && showVideo) {
+          videoEl.play().catch(() => {});
+        }
+      };
+
+      vTracks.forEach((t) => {
+        t.addEventListener('unmute', onTrackChange);
+        t.addEventListener('ended', onTrackChange);
+      });
+
+      return () => {
+        vTracks.forEach((t) => {
+          t.removeEventListener('unmute', onTrackChange);
+          t.removeEventListener('ended', onTrackChange);
+        });
+      };
+    }
+  }, [stream, showVideo, isCameraOff]);
 
   return (
     <div
@@ -83,4 +134,3 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
     </div>
   );
 };
-

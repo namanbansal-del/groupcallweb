@@ -14,6 +14,7 @@ import {
   Edit2,
   Check,
   X,
+  Copy,
 } from 'lucide-react';
 import type { Participant } from '../types';
 import { useWebGroupCall } from '../hooks/useWebGroupCall';
@@ -42,8 +43,17 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [newNameInput, setNewNameInput] = useState('');
+  const [copiedRoom, setCopiedRoom] = useState(false);
 
-  // Group all participants with bulletproof deduplication
+  const handleCopyRoomCode = () => {
+    if (callState.roomId) {
+      navigator.clipboard.writeText(callState.roomId);
+      setCopiedRoom(true);
+      setTimeout(() => setCopiedRoom(false), 2000);
+    }
+  };
+
+  // Group all participants with bulletproof deduplication and active-stream priority sorting
   const allUsers: Participant[] = useMemo(() => {
     const localId = callState.localParticipant.id;
     const localWithStream: Participant = {
@@ -74,6 +84,17 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
       if (r.userId) seenIds.add(r.userId);
       dedupedRemotes.push(r);
     }
+
+    // Prioritize active participants with active media streams or raised hands ahead of idle/ghost participants
+    dedupedRemotes.sort((a, b) => {
+      const aHasStream = !!(a.stream && a.stream.getTracks().length > 0);
+      const bHasStream = !!(b.stream && b.stream.getTracks().length > 0);
+      if (aHasStream !== bHasStream) return aHasStream ? -1 : 1;
+
+      if (a.isHandRaised !== b.isHandRaised) return a.isHandRaised ? -1 : 1;
+
+      return 0;
+    });
 
     return [localWithStream, ...dedupedRemotes];
   }, [
@@ -152,6 +173,16 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         <div className="call-header-left">
           <div className="room-identity">
             <h1 className="room-name">{callState.roomId || 'Group Meeting'}</h1>
+            <button
+              type="button"
+              className="btn-header-tool"
+              onClick={handleCopyRoomCode}
+              title="Copy Room ID to invite others"
+              style={{ padding: '4px 8px', fontSize: '0.75rem', gap: '4px' }}
+            >
+              {copiedRoom ? <Check size={13} color="#10B981" /> : <Copy size={13} />}
+              <span>{copiedRoom ? 'Copied' : 'Copy'}</span>
+            </button>
             <span className="room-timer">{formatDuration(callState.durationSec)}</span>
           </div>
         </div>
