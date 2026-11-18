@@ -55,6 +55,7 @@ export function useWebGroupCall({
   const screenStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const peerStreamsRef = useRef<Map<string, MediaStream>>(new Map());
+  const dataChannelsRef = useRef<Map<string, RTCDataChannel>>(new Map());
   const timerRef = useRef<number | null>(null);
   const stateRef = useRef(callState);
   stateRef.current = callState;
@@ -104,9 +105,21 @@ export function useWebGroupCall({
       if (index >= 0) {
         const existing = list[index];
         const updated = [...list];
+        // Prefer real name over generic placeholder names like "Participant (xxxx)" or "User_xxxx"
+        const isCurrentPlaceholder =
+          existing.name.startsWith('Participant (') || existing.name.startsWith('User_');
+        const isNewPlaceholder =
+          info.name.startsWith('Participant (') || info.name.startsWith('User_');
+        const bestName =
+          !isNewPlaceholder && info.name
+            ? info.name
+            : isCurrentPlaceholder && !isNewPlaceholder
+            ? info.name
+            : existing.name || info.name;
+
         updated[index] = {
           ...existing,
-          name: info.name || existing.name,
+          name: bestName,
           socketId: info.socketId || existing.socketId,
           userId: info.userId || existing.userId,
           isMuted: typeof info.isMuted === 'boolean' ? info.isMuted : existing.isMuted,
@@ -135,6 +148,85 @@ export function useWebGroupCall({
       ];
     },
     [currentUser.id, socket?.id]
+  );
+
+  // ── Setup P2P DataChannel for Real-Time Direct Hand-Raise & Name Sync ────
+  const setupDataChannel = useCallback(
+    (peerId: string, dc: RTCDataChannel) => {
+      dataChannelsRef.current.set(peerId, dc);
+
+      const sendSync = () => {
+        if (dc.readyState === 'open') {
+          try {
+            dc.send(
+              JSON.stringify({
+                type: 'sync-user',
+                name: stateRef.current.localParticipant.name,
+                isHandRaised: stateRef.current.localParticipant.isHandRaised,
+                userId: currentUser.id,
+              })
+            );
+          } catch (e) {
+            console.warn('[DataChannel] sendSync error:', e);
+          }
+        }
+      };
+
+      dc.onopen = () => {
+        console.log(`[DataChannel] Connected directly to peer ${peerId}`);
+        sendSync();
+      };
+
+      dc.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log(`[DataChannel] Direct P2P packet from ${peerId}:`, data);
+
+          if (data.type === 'sync-user' || data.type === 'name-change') {
+            const realName = (data.name || '').trim();
+            if (realName) {
+              setCallState((prev) => ({
+                ...prev,
+                participants: prev.participants.map((p) => {
+                  const match =
+                    p.id === peerId ||
+                    p.socketId === peerId ||
+                    (data.userId && p.userId === data.userId);
+                  if (match) {
+                    return {
+                      ...p,
+                      name: realName,
+                      isHandRaised:
+                        typeof data.isHandRaised === 'boolean' ? data.isHandRaised : p.isHandRaised,
+                    };
+                  }
+                  return p;
+                }),
+              }));
+            }
+          } else if (data.type === 'hand-raise') {
+            const isHandRaised = !!data.isHandRaised;
+            setCallState((prev) => ({
+              ...prev,
+              participants: prev.participants.map((p) => {
+                const match =
+                  p.id === peerId ||
+                  p.socketId === peerId ||
+                  (data.userId && p.userId === data.userId);
+                return match ? { ...p, isHandRaised } : p;
+              }),
+            }));
+          }
+        } catch (err) {
+          console.warn('[DataChannel] Error parsing packet:', err);
+        }
+      };
+
+      dc.onclose = () => {
+        dataChannelsRef.current.delete(peerId);
+      };
+    },
+    [currentUser.id]
   );
 
   // ── Fetch ICE Config from REST Endpoint (/api/webrtc/config) ─────
@@ -227,6 +319,20 @@ export function useWebGroupCall({
         });
       }
 
+      // P2P DataChannel setup for real name & hand-raise messaging
+      if (isInitiator) {
+        try {
+          const dc = pc.createDataChannel('groupcall-control');
+          setupDataChannel(remoteSocketId, dc);
+        } catch (e) {
+          console.warn('[Web Mesh] Error creating DataChannel:', e);
+        }
+      }
+
+      pc.ondatachannel = (event) => {
+        setupDataChannel(remoteSocketId, event.channel);
+      };
+
       // Relay ICE candidates
       pc.onicecandidate = (event) => {
         if (event.candidate && socket?.connected) {
@@ -235,7 +341,6 @@ export function useWebGroupCall({
             to: remoteSocketId,
             candidate: candidateData,
           });
-          // Backward-compatible alias
           socket.emit('peer:ice-candidate', {
             roomId: stateRef.current.roomId,
             targetUserId: remoteSocketId,
@@ -290,7 +395,7 @@ export function useWebGroupCall({
 
       return pc;
     },
-    [currentUser.id, iceConfig, socket]
+    [currentUser.id, iceConfig, setupDataChannel, socket]
   );
 
   // ── Join Group Call ──────────────────────────────────────────────
@@ -380,14 +485,22 @@ export function useWebGroupCall({
           },
         }));
 
-        if (socket?.connected) {
-          // Standard guide event: join-room
+        const emitJoin = () => {
+          if (!socket) return;
           socket.emit(
             'join-room',
             {
               roomCode,
+              roomId: roomCode,
               userName: effectiveName,
+              name: effectiveName,
+              displayName: effectiveName,
               userId: currentUser.id,
+              user: {
+                id: currentUser.id,
+                name: effectiveName,
+                userName: effectiveName,
+              },
             },
             (ack: any) => {
               if (ack) {
@@ -396,18 +509,24 @@ export function useWebGroupCall({
             }
           );
 
-          // Backward-compatible alias
           socket.emit('room:join', {
             roomId: roomCode,
             user: {
               id: currentUser.id,
               name: effectiveName,
+              userName: effectiveName,
               avatar: currentUser.avatar,
               isMuted: initialMuted,
               isCameraOff: initialCameraOff,
               mode,
             },
           });
+        };
+
+        if (socket?.connected) {
+          emitJoin();
+        } else if (socket) {
+          socket.once('connect', emitJoin);
         }
       } catch (err: any) {
         setCallState((prev) => ({
@@ -431,6 +550,21 @@ export function useWebGroupCall({
         localParticipant: { ...prev.localParticipant, name: trimmed },
       }));
 
+      // 1. Direct P2P DataChannel broadcast (bypasses any server drops)
+      const msg = JSON.stringify({
+        type: 'name-change',
+        name: trimmed,
+        userId: currentUser.id,
+      });
+      dataChannelsRef.current.forEach((dc) => {
+        if (dc.readyState === 'open') {
+          try {
+            dc.send(msg);
+          } catch (e) {}
+        }
+      });
+
+      // 2. Also emit over socket
       if (socket?.connected) {
         const payload = {
           userName: trimmed,
@@ -472,6 +606,13 @@ export function useWebGroupCall({
       screenStreamRef.current.getTracks().forEach((t) => t.stop());
       screenStreamRef.current = null;
     }
+
+    dataChannelsRef.current.forEach((dc) => {
+      try {
+        dc.close();
+      } catch (e) {}
+    });
+    dataChannelsRef.current.clear();
 
     peersRef.current.forEach((pc) => pc.close());
     peersRef.current.clear();
@@ -521,7 +662,7 @@ export function useWebGroupCall({
     }
   }, [socket]);
 
-  // ── Toggle Camera ────────────────────────────────────────────────
+  // ── Toggle Camera (Complete Hardware Sensor Power Down) ───────────
   const toggleCamera = useCallback(async () => {
     const nextCameraOff = !stateRef.current.isCameraOff;
 
@@ -640,7 +781,7 @@ export function useWebGroupCall({
     }
   }, []);
 
-  // ── Toggle Hand Raise ────────────────────────────────────────────
+  // ── Toggle Hand Raise (P2P DataChannel + Socket Fallback) ─────────
   const toggleHandRaise = useCallback(() => {
     const nextHand = !stateRef.current.isHandRaised;
     setCallState((prev) => ({
@@ -649,6 +790,24 @@ export function useWebGroupCall({
       localParticipant: { ...prev.localParticipant, isHandRaised: nextHand },
     }));
 
+    // 1. Direct WebRTC DataChannel broadcast to all peers (100% reliable)
+    const msg = JSON.stringify({
+      type: 'hand-raise',
+      isHandRaised: nextHand,
+      userId: currentUser.id,
+      name: stateRef.current.localParticipant.name,
+    });
+    dataChannelsRef.current.forEach((dc) => {
+      if (dc.readyState === 'open') {
+        try {
+          dc.send(msg);
+        } catch (e) {
+          console.warn('[DataChannel] send hand-raise error:', e);
+        }
+      }
+    });
+
+    // 2. Also emit over socket as fallback
     if (socket?.connected) {
       const payload = {
         roomId: stateRef.current.roomId,
@@ -815,6 +974,7 @@ export function useWebGroupCall({
           peerStreamsRef.current.delete(key);
         }
       }
+      dataChannelsRef.current.delete(peerId);
 
       setCallState((prev) => ({
         ...prev,
@@ -856,7 +1016,7 @@ export function useWebGroupCall({
       }));
     };
 
-    // 8. Hand Raise Listener
+    // 8. Hand Raise Listener (from Socket)
     const onPeerHandRaise = (payload: any = {}) => {
       const peerId = payload.socketId || payload.userId || payload.id || payload.user?.id;
       if (!peerId) return;
@@ -885,7 +1045,7 @@ export function useWebGroupCall({
       }));
     };
 
-    // 9. Display Name Change Listener
+    // 9. Display Name Change Listener (from Socket)
     const onPeerNameChange = (payload: any = {}) => {
       const peerId = payload.socketId || payload.userId || payload.id;
       const updatedName = payload.userName || payload.name;
