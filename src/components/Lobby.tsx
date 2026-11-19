@@ -77,8 +77,9 @@ export const Lobby: React.FC<LobbyProps> = ({
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: 'user',
-            width: { ideal: 640 },
-            height: { ideal: 480 },
+            width: { ideal: 1280, min: 640 },
+            height: { ideal: 720, min: 360 },
+            aspectRatio: { ideal: 1.7777777778 },
           },
           audio: true,
         });

@@ -806,8 +806,9 @@ export function useWebGroupCall({
                 ? false
                 : {
                     facingMode: 'user',
-                    width: { ideal: 640 },
-                    height: { ideal: 480 },
+                    width: { ideal: 1280, min: 640 },
+                    height: { ideal: 720, min: 360 },
+                    aspectRatio: { ideal: 1.7777777778 },
                   },
             });
 
@@ -1108,7 +1109,12 @@ export function useWebGroupCall({
       // Starting camera: acquire fresh video track from getUserMedia
       try {
         const videoStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 } },
+          video: {
+            facingMode: 'user',
+            width: { ideal: 1280, min: 640 },
+            height: { ideal: 720, min: 360 },
+            aspectRatio: { ideal: 1.7777777778 },
+          },
         });
         const newTrack = videoStream.getVideoTracks()[0];
         if (newTrack) {

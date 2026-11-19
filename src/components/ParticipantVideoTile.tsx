@@ -19,6 +19,7 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
   const initial = name ? name.slice(0, 1).toUpperCase() : '?';
   const [, setTrackVersion] = useState(0);
   const [hasFrames, setHasFrames] = useState(isLocal);
+  const [isPortrait, setIsPortrait] = useState(false);
 
   // Check if live video tracks actually exist on this stream
   const hasLiveVideoTrack = !!(
@@ -48,6 +49,9 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
     const checkReady = () => {
       if (videoEl && videoEl.videoWidth > 0) {
         setHasFrames(true);
+        if (videoEl.videoHeight > 0) {
+          setIsPortrait(videoEl.videoHeight > videoEl.videoWidth);
+        }
       }
     };
 
@@ -135,7 +139,7 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
         muted={true}
         className={`video-elem ${isLocal && !isScreenSharing ? 'video-mirrored' : ''} ${
           isScreenSharing ? 'video-screenshare' : ''
-        }`}
+        } ${isPortrait ? 'video-portrait' : ''}`}
         style={{
           display: showVideo ? 'block' : 'none',
           opacity: isVideoRendering ? 1 : 0,
