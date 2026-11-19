@@ -21,6 +21,7 @@ import { useWebGroupCall } from '../hooks/useWebGroupCall';
 import { ParticipantVideoTile } from './ParticipantVideoTile';
 import { ParticipantVoiceCard } from './ParticipantVoiceCard';
 import { ParticipantsDrawer } from './ParticipantsDrawer';
+import { PresentationStage } from './PresentationStage';
 import { RemoteAudio } from './RemoteAudio';
 
 interface ActiveCallProps {
@@ -31,6 +32,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
   const {
     callState,
     localStream,
+    screenStream,
     toggleMute,
     toggleCamera,
     toggleScreenShare,
@@ -147,6 +149,18 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
     (u) => u.isScreenSharing && u.id !== callState.localParticipant.id
   );
 
+  const isLocalScreenSharing = callState.isScreenSharing;
+  const isRemoteScreenSharing = !!screenshareUser;
+  const isAnyScreenSharing = isLocalScreenSharing || isRemoteScreenSharing;
+
+  const presentationStream = isLocalScreenSharing
+    ? screenStream || callState.localParticipant.stream
+    : screenshareUser?.stream || null;
+
+  const presentationPresenterName = isLocalScreenSharing
+    ? callState.localParticipant.name
+    : screenshareUser?.name || 'Participant';
+
   const handleOpenRename = () => {
     setNewNameInput(callState.localParticipant.name);
     setIsEditingName(true);
@@ -207,30 +221,6 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         </div>
       </header>
 
-      {/* Screen Sharing Status Banners */}
-      {callState.isScreenSharing ? (
-        <div className="screenshare-presenter-banner">
-          <div className="presenter-banner-left">
-            <MonitorUp size={16} className="presenter-icon" />
-            <span>You are presenting your screen to all participants</span>
-          </div>
-          <button
-            type="button"
-            onClick={toggleScreenShare}
-            className="btn-stop-share"
-          >
-            Stop Presenting
-          </button>
-        </div>
-      ) : screenshareUser ? (
-        <div className="screenshare-viewer-banner">
-          <MonitorUp size={16} className="presenter-icon" />
-          <span>
-            <strong>{screenshareUser.name}</strong> is sharing their screen
-          </span>
-        </div>
-      ) : null}
-
       {/* Raised Hands Alert Banner */}
       {handRaisers.length > 0 && (
         <div className="hand-raise-alert">
@@ -243,7 +233,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
       )}
 
       {/* Helper Banner when alone in the room */}
-      {allUsers.length === 1 && (
+      {!isAnyScreenSharing && allUsers.length === 1 && (
         <div className="single-user-banner">
           <span>
             Waiting for others to join <strong>{callState.roomId}</strong>. Share this Room ID with participants to connect dynamically.
@@ -254,7 +244,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
       {/* Main Calling Stage */}
       <main className="call-stage-area">
         {/* Previous Page Arrow */}
-        {safePage > 0 && (
+        {!isAnyScreenSharing && safePage > 0 && (
           <button
             type="button"
             className="carousel-arrow arrow-left"
@@ -265,9 +255,20 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
           </button>
         )}
 
-        {/* Video or Voice Grid View */}
+        {/* Video, Voice Grid, or Fullscreen Presentation with Camera PiP */}
         <div className="stage-content">
-          {callState.mode === 'video' ? (
+          {isAnyScreenSharing && presentationStream ? (
+            <PresentationStage
+              screenStream={presentationStream}
+              presenterName={presentationPresenterName}
+              isLocalPresenter={isLocalScreenSharing}
+              cameraStream={localStream}
+              cameraParticipant={callState.localParticipant}
+              isCameraOff={callState.isCameraOff}
+              isMuted={callState.isMuted}
+              onStopPresenting={isLocalScreenSharing ? toggleScreenShare : undefined}
+            />
+          ) : callState.mode === 'video' ? (
             <div
               className={`web-video-grid grid-count-${Math.min(currentUsers.length, 6)}`}
             >
@@ -308,7 +309,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         </div>
 
         {/* Next Page Arrow */}
-        {safePage < totalPages - 1 && (
+        {!isAnyScreenSharing && safePage < totalPages - 1 && (
           <button
             type="button"
             className="carousel-arrow arrow-right"
@@ -321,7 +322,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
       </main>
 
       {/* Bottom Pagination Control */}
-      {totalPages > 1 && (
+      {!isAnyScreenSharing && totalPages > 1 && (
         <div className="pagination-bar-wrap">
           <button
             type="button"

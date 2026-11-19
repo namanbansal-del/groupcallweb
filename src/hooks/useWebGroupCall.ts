@@ -62,6 +62,7 @@ export function useWebGroupCall({
   });
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [iceConfig, setIceConfig] = useState<RTCConfiguration>(FALLBACK_ICE_SERVERS);
   const iceConfigRef = useRef<RTCConfiguration>(FALLBACK_ICE_SERVERS);
   iceConfigRef.current = iceConfig;
@@ -763,6 +764,7 @@ export function useWebGroupCall({
       screenStreamRef.current.getTracks().forEach((t) => t.stop());
       screenStreamRef.current = null;
     }
+    setScreenStream(null);
 
     dataChannelsRef.current.forEach((dc) => {
       try {
@@ -913,6 +915,7 @@ export function useWebGroupCall({
         screenStreamRef.current.getTracks().forEach((t) => t.stop());
         screenStreamRef.current = null;
       }
+      setScreenStream(null);
 
       const cameraTrack = localStreamRef.current?.getVideoTracks()[0] || null;
 
@@ -967,6 +970,7 @@ export function useWebGroupCall({
           audio: false,
         });
         screenStreamRef.current = screenStream;
+        setScreenStream(screenStream);
 
         const screenTrack = screenStream.getVideoTracks()[0];
         screenTrack.onended = () => {
@@ -1402,6 +1406,7 @@ export function useWebGroupCall({
   return {
     callState,
     localStream,
+    screenStream,
     joinGroupCall,
     leaveGroupCall,
     changeName,
