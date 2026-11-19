@@ -44,6 +44,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [newNameInput, setNewNameInput] = useState('');
   const [copiedRoom, setCopiedRoom] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
   const handleCopyRoomCode = () => {
     if (callState.roomId) {
@@ -455,7 +456,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
           <button
             type="button"
             className="dock-btn dock-btn-end"
-            onClick={leaveGroupCall}
+            onClick={() => setShowLeaveConfirm(true)}
             title="Leave Meeting"
           >
             <PhoneOff size={20} />
@@ -463,6 +464,106 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
           </button>
         </div>
       </footer>
+
+      {/* Leave Call Confirmation Dialog */}
+      {showLeaveConfirm && (
+        <div
+          className="drawer-overlay"
+          style={{ zIndex: 110 }}
+          onClick={() => setShowLeaveConfirm(false)}
+        >
+          <div
+            className="lobby-card"
+            style={{
+              maxWidth: '400px',
+              margin: 'auto',
+              padding: '28px 24px',
+              position: 'relative',
+              textAlign: 'center',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="drawer-close-btn"
+              style={{ position: 'absolute', top: '16px', right: '16px' }}
+              onClick={() => setShowLeaveConfirm(false)}
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+
+            <div
+              style={{
+                width: '52px',
+                height: '52px',
+                borderRadius: '50%',
+                background: '#FEE2E2',
+                color: '#EF4444',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 16px',
+              }}
+            >
+              <PhoneOff size={24} />
+            </div>
+
+            <h2 style={{ fontSize: '19px', fontWeight: 800, marginBottom: '8px', color: 'var(--text-primary)' }}>
+              Leave Meeting?
+            </h2>
+            <p
+              style={{
+                fontSize: '14px',
+                color: 'var(--text-secondary)',
+                lineHeight: '1.5',
+                marginBottom: '24px',
+              }}
+            >
+              Are you sure you want to leave <strong>{callState.roomId || 'the call'}</strong>? You will be disconnected from all participants.
+            </p>
+
+            <div
+              style={{
+                display: 'flex',
+                gap: '12px',
+                justifyContent: 'center',
+              }}
+            >
+              <button
+                type="button"
+                className="page-step-btn"
+                style={{ flex: 1, padding: '10px 16px', justifyContent: 'center' }}
+                onClick={() => setShowLeaveConfirm(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-stop-share"
+                style={{
+                  flex: 1,
+                  padding: '10px 16px',
+                  borderRadius: '10px',
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                }}
+                onClick={() => {
+                  setShowLeaveConfirm(false);
+                  leaveGroupCall();
+                }}
+              >
+                <PhoneOff size={16} />
+                <span>Leave Call</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Searchable 50-Person Drawer */}
       <ParticipantsDrawer
