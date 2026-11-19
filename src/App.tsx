@@ -95,6 +95,10 @@ export function App() {
     );
   };
 
+  const defaultRoomId =
+    new URLSearchParams(window.location.search).get('room')?.toUpperCase() ||
+    undefined;
+
   const isInCall =
     call.callState.status === 'joining' || call.callState.status === 'joined';
 
@@ -106,6 +110,7 @@ export function App() {
         <Lobby
           onJoin={handleJoin}
           defaultName={currentUser.name}
+          defaultRoomId={defaultRoomId}
           serverUrl={serverUrl}
           onUpdateServerUrl={handleUpdateServerUrl}
           isSocketConnected={isSocketConnected}

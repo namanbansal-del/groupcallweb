@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CallMode, GroupCallState, Participant } from '../types';
 
+export interface ChatMessage {
+  id: string;
+  userId: string;
+  name: string;
+  text: string;
+  ts: number;
+}
+
 const FALLBACK_ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     {
@@ -60,6 +68,16 @@ export function useWebGroupCall({
     durationSec: 0,
     error: null,
   });
+
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [unreadChat, setUnreadChat] = useState(0);
+  const [reactions, setReactions] = useState<{ id: string; emoji: string; name: string }[]>([]);
+
+  const pushReaction = useCallback((emoji: string, name: string) => {
+    const id = `${Date.now()}-${Math.random()}`;
+    setReactions((p) => [...p, { id, emoji, name }]);
+    setTimeout(() => setReactions((p) => p.filter((r) => r.id !== id)), 3000);
+  }, []);
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
@@ -223,6 +241,29 @@ export function useWebGroupCall({
           const data = JSON.parse(event.data);
           console.log(`[DataChannel] Direct P2P packet from ${peerId}:`, data);
 
+          if (data.type === 'chat') {
+            setChat((p) =>
+              p.some((m) => m.id === data.id)
+                ? p
+                : [
+                    ...p,
+                    {
+                      id: data.id,
+                      userId: data.userId,
+                      name: data.name,
+                      text: data.text,
+                      ts: data.ts,
+                    },
+                  ]
+            );
+            setUnreadChat((n) => n + 1);
+            return;
+          }
+          if (data.type === 'reaction') {
+            pushReaction(data.emoji, data.name);
+            return;
+          }
+
           if (data.type === 'sync-user' || data.type === 'name-change') {
             const realName = (data.name || '').trim();
             setCallState((prev) => ({
@@ -287,7 +328,7 @@ export function useWebGroupCall({
         dataChannelsRef.current.delete(peerId);
       };
     },
-    [currentUser.id]
+    [currentUser.id, pushReaction]
   );
 
   // ── Fetch ICE Config from REST Endpoint (/api/webrtc/config) ─────
@@ -853,6 +894,8 @@ export function useWebGroupCall({
     }
 
     cleanup();
+    setChat([]);
+    setUnreadChat(0);
 
     setCallState((prev) => ({
       ...prev,
@@ -1465,6 +1508,43 @@ export function useWebGroupCall({
     };
   }, [cleanup]);
 
+  const broadcast = useCallback((obj: unknown) => {
+    const msg = JSON.stringify(obj);
+    dataChannelsRef.current.forEach((dc) => {
+      if (dc.readyState === 'open') {
+        try {
+          dc.send(msg);
+        } catch {}
+      }
+    });
+  }, []);
+
+  const sendChat = useCallback(
+    (text: string) => {
+      const m: ChatMessage = {
+        id: `${currentUser.id}-${Date.now()}`,
+        userId: currentUser.id,
+        name: stateRef.current.localParticipant.name,
+        text,
+        ts: Date.now(),
+      };
+      setChat((p) => [...p, m]);
+      broadcast({ type: 'chat', ...m });
+    },
+    [broadcast, currentUser.id]
+  );
+
+  const sendReaction = useCallback(
+    (emoji: string) => {
+      const name = stateRef.current.localParticipant.name;
+      pushReaction(emoji, 'You');
+      broadcast({ type: 'reaction', emoji, name, userId: currentUser.id });
+    },
+    [broadcast, currentUser.id, pushReaction]
+  );
+
+  const clearUnread = useCallback(() => setUnreadChat(0), []);
+
   return {
     callState,
     localStream,
@@ -1476,5 +1556,11 @@ export function useWebGroupCall({
     toggleCamera,
     toggleScreenShare,
     toggleHandRaise,
+    chat,
+    unreadChat,
+    reactions,
+    sendChat,
+    sendReaction,
+    clearUnread,
   };
 }

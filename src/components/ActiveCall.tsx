@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Mic,
   MicOff,
@@ -15,6 +15,9 @@ import {
   Check,
   X,
   Copy,
+  MessageSquare,
+  Smile,
+  Pin,
 } from 'lucide-react';
 import type { Participant } from '../types';
 import { useWebGroupCall } from '../hooks/useWebGroupCall';
@@ -23,6 +26,8 @@ import { ParticipantVoiceCard } from './ParticipantVoiceCard';
 import { ParticipantsDrawer } from './ParticipantsDrawer';
 import { PresentationStage } from './PresentationStage';
 import { RemoteAudio } from './RemoteAudio';
+import { ChatPanel } from './ChatPanel';
+import { ReactionPicker, ReactionsOverlay } from './ReactionsOverlay';
 
 interface ActiveCallProps {
   call: ReturnType<typeof useWebGroupCall>;
@@ -39,6 +44,12 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
     toggleHandRaise,
     changeName,
     leaveGroupCall,
+    chat,
+    unreadChat,
+    reactions,
+    sendChat,
+    sendReaction,
+    clearUnread,
   } = call;
 
   const [currentPage, setCurrentPage] = useState(0);
@@ -47,10 +58,40 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
   const [newNameInput, setNewNameInput] = useState('');
   const [copiedRoom, setCopiedRoom] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isReactOpen, setIsReactOpen] = useState(false);
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
+
+  // Keyboard shortcuts (Meet-style: Ctrl/Cmd+D mic, Ctrl/Cmd+E camera)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        toggleMute();
+      }
+      if (e.key.toLowerCase() === 'e') {
+        e.preventDefault();
+        toggleCamera();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleMute, toggleCamera]);
+
+  useEffect(() => {
+    if (isChatOpen && chat.length > 0) {
+      clearUnread();
+    }
+  }, [isChatOpen, chat.length, clearUnread]);
 
   const handleCopyRoomCode = () => {
     if (callState.roomId) {
-      navigator.clipboard.writeText(callState.roomId);
+      navigator.clipboard.writeText(
+        `${window.location.origin}${window.location.pathname}?room=${callState.roomId}`
+      );
       setCopiedRoom(true);
       setTimeout(() => setCopiedRoom(false), 2000);
     }
@@ -268,18 +309,82 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
               onStopPresenting={isLocalScreenSharing ? toggleScreenShare : undefined}
             />
           ) : callState.mode === 'video' ? (
-            <div
-              className={`web-video-grid grid-count-${Math.min(currentUsers.length, 16)}`}
-            >
-              {currentUsers.map((user) => (
-                <div key={user.id} className="video-grid-cell">
-                  <ParticipantVideoTile
-                    participant={user}
-                    isLocal={user.id === callState.localParticipant.id}
-                  />
+            pinnedId && allUsers.some((u) => u.id === pinnedId) ? (
+              <div className="pinned-layout">
+                <div className="pinned-main">
+                  <div
+                    className="video-grid-cell"
+                    onDoubleClick={() => setPinnedId(null)}
+                    style={{ height: '100%', position: 'relative' }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setPinnedId(null)}
+                      title="Click or double-click to unpin"
+                      style={{
+                        position: 'absolute',
+                        top: 10,
+                        left: 10,
+                        zIndex: 10,
+                        background: 'rgba(15, 23, 42, 0.75)',
+                        backdropFilter: 'blur(4px)',
+                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                        color: '#FFFFFF',
+                        borderRadius: 6,
+                        padding: '3px 8px',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <Pin size={12} />
+                      <span>Unpin</span>
+                    </button>
+                    <ParticipantVideoTile
+                      participant={allUsers.find((u) => u.id === pinnedId)!}
+                      isLocal={pinnedId === callState.localParticipant.id}
+                    />
+                  </div>
                 </div>
-              ))}
-            </div>
+                <div className="pinned-strip">
+                  {allUsers
+                    .filter((u) => u.id !== pinnedId)
+                    .map((u) => (
+                      <div
+                        key={u.id}
+                        className="video-grid-cell"
+                        onDoubleClick={() => setPinnedId(u.id)}
+                      >
+                        <ParticipantVideoTile
+                          participant={u}
+                          isLocal={u.id === callState.localParticipant.id}
+                        />
+                      </div>
+                    ))}
+                </div>
+              </div>
+            ) : (
+              <div
+                className={`web-video-grid grid-count-${Math.min(currentUsers.length, 16)}`}
+              >
+                {currentUsers.map((user) => (
+                  <div
+                    key={user.id}
+                    className="video-grid-cell"
+                    onDoubleClick={() => setPinnedId(user.id)}
+                    title="Double-click to pin"
+                  >
+                    <ParticipantVideoTile
+                      participant={user}
+                      isLocal={user.id === callState.localParticipant.id}
+                    />
+                  </div>
+                ))}
+              </div>
+            )
           ) : currentUsers.length === 1 && totalPages === 1 ? (
             /* Single Audio User Hero View */
             <div className="single-voice-hero">
@@ -438,6 +543,34 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
             <span className="dock-btn-label">
               {callState.isHandRaised ? 'Lower Hand' : 'Raise Hand'}
             </span>
+          </button>
+
+          {/* Reactions */}
+          <button
+            type="button"
+            className={`dock-btn ${isReactOpen ? 'dock-btn-active' : ''}`}
+            onClick={() => setIsReactOpen((v) => !v)}
+            title="Send a reaction"
+          >
+            <Smile size={20} />
+            <span className="dock-btn-label">React</span>
+          </button>
+
+          {/* In-Call Chat */}
+          <button
+            type="button"
+            className={`dock-btn ${isChatOpen ? 'dock-btn-active' : ''}`}
+            onClick={() => {
+              setIsChatOpen((v) => !v);
+              clearUnread();
+            }}
+            title="Chat with everyone"
+          >
+            <MessageSquare size={20} />
+            <span className="dock-btn-label">Chat</span>
+            {unreadChat > 0 && !isChatOpen && (
+              <span className="dock-badge">{unreadChat}</span>
+            )}
           </button>
 
           {/* Open Participants Drawer */}
@@ -632,6 +765,23 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
           </div>
         </div>
       )}
+
+      {isReactOpen && (
+        <ReactionPicker
+          onPick={(e) => {
+            sendReaction(e);
+            setIsReactOpen(false);
+          }}
+        />
+      )}
+      <ReactionsOverlay reactions={reactions} />
+      <ChatPanel
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        messages={chat}
+        onSend={sendChat}
+        selfId={callState.localParticipant.id}
+      />
     </div>
   );
 };
