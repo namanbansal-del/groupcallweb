@@ -199,20 +199,10 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
             title="Change Your Display Name"
           >
             <User size={15} />
-            <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {callState.localParticipant.name}
             </span>
             <Edit2 size={12} color="#64748B" />
-          </button>
-
-          {/* Participant Drawer Button */}
-          <button
-            type="button"
-            className="btn-header-tool"
-            onClick={() => setIsDrawerOpen(true)}
-          >
-            <Users size={16} />
-            <span>{allUsers.length}</span>
           </button>
         </div>
       </header>
