@@ -491,6 +491,18 @@ export function useWebGroupCall({
           stream.addTrack(event.track);
         }
 
+        event.track.onunmute = () => {
+          console.log(`[Web Mesh] Track unmuted from ${remoteSocketId}: ${event.track.kind}`);
+          setCallState((prev) => ({
+            ...prev,
+            participants: prev.participants.map((p) =>
+              p.id === remoteSocketId || p.socketId === remoteSocketId
+                ? { ...p, stream: new MediaStream(peerStreamsRef.current.get(remoteSocketId)?.getTracks() || []) }
+                : p
+            ),
+          }));
+        };
+
         // Create a new reference so React hooks and child components re-render immediately
         const freshStream = new MediaStream(stream.getTracks());
         peerStreamsRef.current.set(remoteSocketId, freshStream);
@@ -563,7 +575,8 @@ export function useWebGroupCall({
       mode: CallMode = 'video',
       userName?: string,
       cameraEnabled: boolean = true,
-      micEnabled: boolean = true
+      micEnabled: boolean = true,
+      existingStream?: MediaStream | null
     ) => {
       const roomCode = roomId.trim().toUpperCase() || 'TEST-ROOM';
       const effectiveName = (userName || currentUser.name || 'Alex Johnson').trim();
@@ -590,32 +603,79 @@ export function useWebGroupCall({
         }));
 
         let stream: MediaStream | null = null;
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-            video: initialCameraOff ? false : { width: { ideal: 640 }, height: { ideal: 480 } },
-          });
 
-          if (stream && initialMuted) {
+        // 1. Reuse existing live stream if passed from Lobby (prevents iOS Safari NotReadableError)
+        if (
+          existingStream &&
+          existingStream.getTracks().some((t) => t.readyState === 'live')
+        ) {
+          stream = existingStream;
+          if (initialCameraOff) {
+            stream.getVideoTracks().forEach((track) => {
+              track.stop();
+              stream?.removeTrack(track);
+            });
+          }
+          if (initialMuted) {
             stream.getAudioTracks().forEach((track) => {
               track.enabled = false;
             });
           }
-        } catch (mediaErr: any) {
-          console.warn('getUserMedia warning:', mediaErr);
-          if (!initialCameraOff) {
-            try {
-              stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-              if (stream && initialMuted) {
-                stream.getAudioTracks().forEach((track) => {
-                  track.enabled = false;
+        } else {
+          // 2. Otherwise acquire fresh media with mobile-safe constraints
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: initialCameraOff
+                ? false
+                : {
+                    facingMode: 'user',
+                    width: { ideal: 640 },
+                    height: { ideal: 480 },
+                  },
+            });
+
+            if (stream && initialMuted) {
+              stream.getAudioTracks().forEach((track) => {
+                track.enabled = false;
+              });
+            }
+          } catch (mediaErr: any) {
+            console.warn('getUserMedia initial error, trying mobile fallback:', mediaErr);
+            if (!initialCameraOff) {
+              try {
+                // Secondary fallback: relaxed constraints without resolution bounds
+                stream = await navigator.mediaDevices.getUserMedia({
+                  audio: true,
+                  video: { facingMode: 'user' },
                 });
+                if (stream && initialMuted) {
+                  stream.getAudioTracks().forEach((track) => {
+                    track.enabled = false;
+                  });
+                }
+              } catch (secondErr) {
+                try {
+                  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                  if (stream && initialMuted) {
+                    stream.getAudioTracks().forEach((track) => {
+                      track.enabled = false;
+                    });
+                  }
+                } catch {
+                  stream = null;
+                }
               }
-            } catch {
-              stream = null;
             }
           }
         }
+
+        // Determine actual camera state based on real live video track availability
+        const actualCameraOff =
+          !stream ||
+          stream.getVideoTracks().length === 0 ||
+          stream.getVideoTracks().every((t) => t.readyState === 'ended') ||
+          initialCameraOff;
 
         localStreamRef.current = stream;
         setLocalStream(stream);
@@ -632,14 +692,14 @@ export function useWebGroupCall({
         setCallState((prev) => ({
           ...prev,
           status: 'joined',
-          isCameraOff: initialCameraOff,
+          isCameraOff: actualCameraOff,
           isMuted: initialMuted,
           localParticipant: {
             ...prev.localParticipant,
             name: effectiveName,
             stream,
             isMuted: initialMuted,
-            isCameraOff: initialCameraOff,
+            isCameraOff: actualCameraOff,
           },
         }));
 
@@ -659,6 +719,8 @@ export function useWebGroupCall({
                 name: effectiveName,
                 userName: effectiveName,
               },
+              isCameraOff: actualCameraOff,
+              isMuted: initialMuted,
             },
             (ack: any) => {
               if (ack) {
@@ -675,7 +737,7 @@ export function useWebGroupCall({
               userName: effectiveName,
               avatar: currentUser.avatar,
               isMuted: initialMuted,
-              isCameraOff: initialCameraOff,
+              isCameraOff: actualCameraOff,
               mode,
             },
           });

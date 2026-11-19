@@ -16,6 +16,7 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const initial = name ? name.slice(0, 1).toUpperCase() : '?';
   const [, setTrackVersion] = useState(0);
+  const [hasFrames, setHasFrames] = useState(isLocal);
 
   // Check if live video tracks actually exist on this stream
   const hasLiveVideoTrack = !!(
@@ -30,6 +31,11 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
     const videoEl = videoRef.current;
     if (!videoEl) return;
 
+    // Reset frame state on stream change
+    if (!isLocal) {
+      setHasFrames(false);
+    }
+
     // Strict mobile / Safari inline autoplay compliance
     videoEl.muted = true;
     videoEl.defaultMuted = true;
@@ -37,30 +43,36 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
     videoEl.setAttribute('playsinline', 'true');
     videoEl.setAttribute('webkit-playsinline', 'true');
 
+    const checkReady = () => {
+      if (videoEl && videoEl.videoWidth > 0) {
+        setHasFrames(true);
+      }
+    };
+
     if (stream && showVideo) {
       if (videoEl.srcObject !== stream) {
         videoEl.srcObject = stream;
       }
       const playPromise = videoEl.play();
       if (playPromise !== undefined) {
-        playPromise.catch((err) => {
+        playPromise.then(checkReady).catch((err) => {
           console.warn('[ParticipantVideoTile] play() error:', err?.message || err);
         });
       }
     } else {
       videoEl.srcObject = null;
+      setHasFrames(false);
     }
 
-    const handleLoadedMetadata = () => {
-      if (videoEl && showVideo) {
-        videoEl.play().catch(() => {});
-      }
-    };
-    videoEl.addEventListener('loadedmetadata', handleLoadedMetadata);
+    videoEl.addEventListener('loadeddata', checkReady);
+    videoEl.addEventListener('playing', checkReady);
+    videoEl.addEventListener('canplay', checkReady);
+    videoEl.addEventListener('timeupdate', checkReady);
+    videoEl.addEventListener('resize', checkReady);
 
     const handleUserInteraction = () => {
       if (videoEl && videoEl.paused && showVideo) {
-        videoEl.play().catch(() => {});
+        videoEl.play().then(checkReady).catch(() => {});
       }
     };
     window.addEventListener('touchstart', handleUserInteraction, { once: true });
@@ -71,8 +83,8 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
       const vTracks = stream.getVideoTracks();
       const onTrackChange = () => {
         setTrackVersion((v) => v + 1);
-        if (videoEl && videoEl.paused && showVideo) {
-          videoEl.play().catch(() => {});
+        if (videoEl && showVideo) {
+          videoEl.play().then(checkReady).catch(() => {});
         }
       };
 
@@ -82,7 +94,11 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
       });
 
       return () => {
-        videoEl.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        videoEl.removeEventListener('loadeddata', checkReady);
+        videoEl.removeEventListener('playing', checkReady);
+        videoEl.removeEventListener('canplay', checkReady);
+        videoEl.removeEventListener('timeupdate', checkReady);
+        videoEl.removeEventListener('resize', checkReady);
         window.removeEventListener('touchstart', handleUserInteraction);
         window.removeEventListener('click', handleUserInteraction);
         vTracks.forEach((t) => {
@@ -93,11 +109,18 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
     }
 
     return () => {
-      videoEl.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      videoEl.removeEventListener('loadeddata', checkReady);
+      videoEl.removeEventListener('playing', checkReady);
+      videoEl.removeEventListener('canplay', checkReady);
+      videoEl.removeEventListener('timeupdate', checkReady);
+      videoEl.removeEventListener('resize', checkReady);
       window.removeEventListener('touchstart', handleUserInteraction);
       window.removeEventListener('click', handleUserInteraction);
     };
-  }, [stream, showVideo, isCameraOff, isScreenSharing]);
+  }, [stream, showVideo, isCameraOff, isScreenSharing, isLocal]);
+
+  // Video feed is actively visible only when frames are rendering
+  const isVideoRendering = showVideo && (isLocal || hasFrames);
 
   return (
     <div
@@ -111,9 +134,13 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
         className={`video-elem ${isLocal && !isScreenSharing ? 'video-mirrored' : ''} ${
           isScreenSharing ? 'video-screenshare' : ''
         }`}
-        style={{ display: showVideo ? 'block' : 'none' }}
+        style={{
+          display: showVideo ? 'block' : 'none',
+          opacity: isVideoRendering ? 1 : 0,
+          transition: 'opacity 0.2s ease',
+        }}
       />
-      {!showVideo && (
+      {!isVideoRendering && (
         <div className="video-avatar-fallback">
           <div className={`avatar-circle-lg ${isSpeaking && !isMuted ? 'speaking-ring' : ''}`}>
             <span>{initial}</span>

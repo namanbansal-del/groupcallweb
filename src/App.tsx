@@ -77,14 +77,22 @@ export function App() {
     name: string,
     mode: CallMode,
     cameraEnabled: boolean = true,
-    micEnabled: boolean = true
+    micEnabled: boolean = true,
+    existingStream?: MediaStream | null
   ) => {
     const finalName = name.trim() || currentUser.name;
     setCurrentUser((prev) => ({ ...prev, name: finalName }));
     try {
       localStorage.setItem('groupcall_user_name', finalName);
     } catch {}
-    await call.joinGroupCall(roomId, mode, finalName, cameraEnabled, micEnabled);
+    await call.joinGroupCall(
+      roomId,
+      mode,
+      finalName,
+      cameraEnabled,
+      micEnabled,
+      existingStream
+    );
   };
 
   const isInCall =

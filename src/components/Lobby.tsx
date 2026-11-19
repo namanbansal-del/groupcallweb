@@ -8,7 +8,8 @@ interface LobbyProps {
     name: string,
     mode: CallMode,
     cameraEnabled?: boolean,
-    micEnabled?: boolean
+    micEnabled?: boolean,
+    existingStream?: MediaStream | null
   ) => void;
   defaultName?: string;
   defaultRoomId?: string;
@@ -109,14 +110,19 @@ export const Lobby: React.FC<LobbyProps> = ({
     e.preventDefault();
     if (!roomId.trim() || !name.trim()) return;
 
-    // Release preview stream tracks completely so hardware camera light shuts off
-    if (previewStreamRef.current) {
-      previewStreamRef.current.getTracks().forEach((t) => t.stop());
-      previewStreamRef.current = null;
-    }
+    // Preserve active working camera stream for the call (prevents NotReadableError on mobile iOS/Android)
+    const stream = previewStreamRef.current;
+    previewStreamRef.current = null;
     setPreviewStream(null);
 
-    onJoin(roomId.trim().toUpperCase(), name.trim(), mode, cameraEnabled, micEnabled);
+    onJoin(
+      roomId.trim().toUpperCase(),
+      name.trim(),
+      mode,
+      cameraEnabled,
+      micEnabled,
+      stream
+    );
   };
 
   return (
