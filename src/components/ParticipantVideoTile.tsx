@@ -1,15 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { MicOff, Hand, MonitorUp } from 'lucide-react';
+import { MicOff, Hand, MonitorUp, Edit2 } from 'lucide-react';
 import type { Participant } from '../types';
 
 interface ParticipantVideoTileProps {
   participant: Participant;
   isLocal?: boolean;
+  onRename?: () => void;
 }
 
 export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
   participant,
   isLocal = false,
+  onRename,
 }) => {
   const { name, isMuted, isCameraOff, isSpeaking, isHandRaised, isScreenSharing, stream } =
     participant;
@@ -167,9 +169,24 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
 
       {/* Bottom Name & Mic Pill */}
       <div className="video-info-pill">
-        <span className="participant-name" title={name}>
-          {name} {isLocal && '(You)'}
-        </span>
+        {isLocal && onRename ? (
+          <button
+            type="button"
+            className="participant-name-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRename();
+            }}
+            title="Click to edit your display name"
+          >
+            <span className="participant-name">{name} (You)</span>
+            <Edit2 size={11} className="name-edit-icon" />
+          </button>
+        ) : (
+          <span className="participant-name" title={name}>
+            {name} {isLocal && '(You)'}
+          </span>
+        )}
         {isMuted ? (
           <div className="mic-badge-muted" title="Muted">
             <MicOff size={13} color="#EF4444" />

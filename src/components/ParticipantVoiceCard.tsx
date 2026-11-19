@@ -1,17 +1,19 @@
 import React from 'react';
-import { MicOff, Hand } from 'lucide-react';
+import { MicOff, Hand, Edit2 } from 'lucide-react';
 import type { Participant } from '../types';
 
 interface ParticipantVoiceCardProps {
   participant: Participant;
   isLocal?: boolean;
   size?: 'normal' | 'large';
+  onRename?: () => void;
 }
 
 export const ParticipantVoiceCard: React.FC<ParticipantVoiceCardProps> = ({
   participant,
   isLocal = false,
   size = 'normal',
+  onRename,
 }) => {
   const { name, isMuted, isSpeaking, isHandRaised, isHost } = participant;
   const initial = name ? name.slice(0, 1).toUpperCase() : '?';
@@ -53,9 +55,24 @@ export const ParticipantVoiceCard: React.FC<ParticipantVoiceCardProps> = ({
       </div>
 
       {/* Full Participant Name */}
-      <div className={`voice-name ${isLarge ? 'voice-name-large' : ''}`} title={name}>
-        {name} {isLocal && '(You)'}
-      </div>
+      {isLocal && onRename ? (
+        <button
+          type="button"
+          className={`voice-name-btn ${isLarge ? 'voice-name-large' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRename();
+          }}
+          title="Click to edit your display name"
+        >
+          <span>{name} (You)</span>
+          <Edit2 size={isLarge ? 14 : 12} className="name-edit-icon" />
+        </button>
+      ) : (
+        <div className={`voice-name ${isLarge ? 'voice-name-large' : ''}`} title={name}>
+          {name} {isLocal && '(You)'}
+        </div>
+      )}
 
       {/* Role Pill */}
       <div className={`voice-role ${isLarge ? 'voice-role-large' : ''}`}>

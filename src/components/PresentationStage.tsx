@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { MonitorUp, MicOff, Hand } from 'lucide-react';
+import { MonitorUp, MicOff, Hand, Edit2 } from 'lucide-react';
 import type { Participant } from '../types';
 
 interface PresentationStageProps {
@@ -11,6 +11,7 @@ interface PresentationStageProps {
   isCameraOff: boolean;
   isMuted: boolean;
   onStopPresenting?: () => void;
+  onRename?: () => void;
 }
 
 export const PresentationStage: React.FC<PresentationStageProps> = ({
@@ -22,6 +23,7 @@ export const PresentationStage: React.FC<PresentationStageProps> = ({
   isCameraOff,
   isMuted,
   onStopPresenting,
+  onRename,
 }) => {
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -131,9 +133,24 @@ export const PresentationStage: React.FC<PresentationStageProps> = ({
 
           {/* Camera Frame Badges */}
           <div className="pip-info-pill">
-            <span className="pip-name" title={cameraParticipant.name}>
-              {cameraParticipant.name} {isLocalPresenter && '(You)'}
-            </span>
+            {isLocalPresenter && onRename ? (
+              <button
+                type="button"
+                className="participant-name-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRename();
+                }}
+                title="Click to edit your display name"
+              >
+                <span className="pip-name">{cameraParticipant.name} (You)</span>
+                <Edit2 size={10} className="name-edit-icon" />
+              </button>
+            ) : (
+              <span className="pip-name" title={cameraParticipant.name}>
+                {cameraParticipant.name} {isLocalPresenter && '(You)'}
+              </span>
+            )}
             {isMuted ? (
               <div className="pip-mic-muted" title="Muted">
                 <MicOff size={11} color="#EF4444" />

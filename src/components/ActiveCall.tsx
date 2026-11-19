@@ -10,8 +10,6 @@ import {
   Users,
   ChevronLeft,
   ChevronRight,
-  User,
-  Edit2,
   Check,
   X,
   Copy,
@@ -224,32 +222,6 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         })}
       </div>
 
-      {/* Top Navigation Bar */}
-      <header className="call-header">
-        <div className="call-header-left">
-          <div className="call-brand-wrap">
-            <span className="call-live-dot" />
-            <span className="call-brand-title">GroupCall</span>
-          </div>
-        </div>
-
-        <div className="call-header-right">
-          {/* Change Display Name Button */}
-          <button
-            type="button"
-            className="btn-header-tool"
-            onClick={handleOpenRename}
-            title="Change Your Display Name"
-          >
-            <User size={15} />
-            <span style={{ maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {callState.localParticipant.name}
-            </span>
-            <Edit2 size={12} color="#64748B" />
-          </button>
-        </div>
-      </header>
-
       {/* Raised Hands Alert Banner */}
       {handRaisers.length > 0 && (
         <div className="hand-raise-alert">
@@ -296,6 +268,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
               isCameraOff={callState.isCameraOff}
               isMuted={callState.isMuted}
               onStopPresenting={isLocalScreenSharing ? toggleScreenShare : undefined}
+              onRename={handleOpenRename}
             />
           ) : callState.mode === 'video' ? (
             pinnedId && allUsers.some((u) => u.id === pinnedId) ? (
@@ -335,6 +308,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
                     <ParticipantVideoTile
                       participant={allUsers.find((u) => u.id === pinnedId)!}
                       isLocal={pinnedId === callState.localParticipant.id}
+                      onRename={handleOpenRename}
                     />
                   </div>
                 </div>
@@ -350,6 +324,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
                         <ParticipantVideoTile
                           participant={u}
                           isLocal={u.id === callState.localParticipant.id}
+                          onRename={handleOpenRename}
                         />
                       </div>
                     ))}
@@ -369,6 +344,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
                     <ParticipantVideoTile
                       participant={user}
                       isLocal={user.id === callState.localParticipant.id}
+                      onRename={handleOpenRename}
                     />
                   </div>
                 ))}
@@ -381,6 +357,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
                 participant={currentUsers[0]}
                 isLocal={currentUsers[0].id === callState.localParticipant.id}
                 size="large"
+                onRename={handleOpenRename}
               />
               <div className="single-tip-box">
                 Waiting for others to join... Share room ID: <strong>{callState.roomId}</strong>
@@ -396,6 +373,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
                   <ParticipantVoiceCard
                     participant={user}
                     isLocal={user.id === callState.localParticipant.id}
+                    onRename={handleOpenRename}
                   />
                 </div>
               ))}
