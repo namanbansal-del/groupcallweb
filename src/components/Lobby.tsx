@@ -18,6 +18,17 @@ interface LobbyProps {
   isSocketConnected?: boolean;
 }
 
+function generateMeetCode(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz';
+  const bytes = new Uint8Array(10);
+  crypto.getRandomValues(bytes);
+  let str = '';
+  for (let i = 0; i < 10; i++) {
+    str += chars[bytes[i] % chars.length];
+  }
+  return `${str.slice(0, 3)}-${str.slice(3, 7)}-${str.slice(7, 10)}`;
+}
+
 export const Lobby: React.FC<LobbyProps> = ({
   onJoin,
   defaultName = 'Alex Johnson',
@@ -26,16 +37,17 @@ export const Lobby: React.FC<LobbyProps> = ({
   onUpdateServerUrl,
   isSocketConnected = false,
 }) => {
-  // Generate a random room by default to avoid crowding into the shared TEST-ROOM
+  // Generate a random room by default (Google Meet style abc-defg-hij)
   const [roomId, setRoomId] = useState(() => {
     if (defaultRoomId) return defaultRoomId;
-    return `ROOM-${Math.floor(1000 + Math.random() * 9000)}`;
+    return generateMeetCode();
   });
   const [name, setName] = useState(defaultName);
   const [mode, setMode] = useState<CallMode>('video');
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [cameraEnabled, setCameraEnabled] = useState(true);
   const [micEnabled, setMicEnabled] = useState(true);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [showServerConfig, setShowServerConfig] = useState(false);
   const [customServerUrl, setCustomServerUrl] = useState(serverUrl);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -47,14 +59,27 @@ export const Lobby: React.FC<LobbyProps> = ({
     }
   }, [defaultName]);
 
-  // Initialize camera preview
+  // Initialize camera preview only in video mode
   useEffect(() => {
     let active = true;
 
+    if (mode === 'audio') {
+      if (previewStreamRef.current) {
+        previewStreamRef.current.getVideoTracks().forEach((t) => t.stop());
+      }
+      setPreviewStream(null);
+      return;
+    }
+
     async function startPreview() {
       try {
+        setCameraError(null);
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 } },
+          video: {
+            facingMode: 'user',
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+          },
           audio: true,
         });
         if (active) {
@@ -66,8 +91,15 @@ export const Lobby: React.FC<LobbyProps> = ({
         } else {
           stream.getTracks().forEach((t) => t.stop());
         }
-      } catch (err) {
+      } catch (err: any) {
         console.warn('Could not access camera/mic preview:', err);
+        if (active) {
+          setCameraError(
+            err.name === 'NotAllowedError'
+              ? 'Camera/microphone access blocked in browser. Please enable permissions.'
+              : 'Could not access camera device.'
+          );
+        }
       }
     }
 
@@ -80,7 +112,7 @@ export const Lobby: React.FC<LobbyProps> = ({
         previewStreamRef.current = null;
       }
     };
-  }, []);
+  }, [mode]);
 
   const togglePreviewCam = () => {
     const nextState = !cameraEnabled;
@@ -103,7 +135,7 @@ export const Lobby: React.FC<LobbyProps> = ({
   };
 
   const generateRandomRoom = () => {
-    setRoomId(`ROOM-${Math.floor(1000 + Math.random() * 9000)}`);
+    setRoomId(generateMeetCode());
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -176,7 +208,9 @@ export const Lobby: React.FC<LobbyProps> = ({
                 <div className="preview-avatar">
                   {name ? name.slice(0, 1).toUpperCase() : '?'}
                 </div>
-                <span>Camera is Off</span>
+                <span style={{ textAlign: 'center', padding: '0 12px' }}>
+                  {cameraError || 'Camera is Off'}
+                </span>
               </div>
             )}
 

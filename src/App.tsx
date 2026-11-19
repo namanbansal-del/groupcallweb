@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { io } from 'socket.io-client';
+import { useEffect, useState } from 'react';
+import { io, Socket } from 'socket.io-client';
 import type { CallMode } from './types';
 import { useWebGroupCall } from './hooks/useWebGroupCall';
 import { Lobby } from './components/Lobby';
@@ -7,10 +7,12 @@ import { ActiveCall } from './components/ActiveCall';
 
 export function App() {
   const [serverUrl, setServerUrl] = useState(() => {
-    const saved = localStorage.getItem('groupcall_server_url');
-    if (saved && !saved.includes('localhost') && !saved.includes('127.0.0.1')) {
-      return saved;
-    }
+    try {
+      const saved = localStorage.getItem('groupcall_server_url');
+      if (saved && !saved.includes('localhost') && !saved.includes('127.0.0.1')) {
+        return saved;
+      }
+    } catch {}
     return (
       import.meta.env.VITE_SIGNALING_URL ||
       'https://tech.techugo.com:1065'
@@ -18,7 +20,10 @@ export function App() {
   });
 
   const [currentUser, setCurrentUser] = useState(() => {
-    const savedName = localStorage.getItem('groupcall_user_name');
+    let savedName: string | null = null;
+    try {
+      savedName = localStorage.getItem('groupcall_user_name');
+    } catch {}
     return {
       id: `web_user_${Math.floor(1000 + Math.random() * 9000)}`,
       name: savedName || 'Alex Johnson',
@@ -26,38 +31,37 @@ export function App() {
   });
 
   const [isSocketConnected, setIsSocketConnected] = useState(false);
+  const [socket, setSocket] = useState<Socket | null>(null);
 
-  const socket = useMemo(() => {
-    return io(serverUrl, {
+  // Manage socket connection cleanly with full lifecycle disconnect on cleanup
+  useEffect(() => {
+    const s = io(serverUrl, {
       autoConnect: true,
       transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
+      reconnectionAttempts: 15,
       reconnectionDelay: 1500,
     });
-  }, [serverUrl]);
+    setSocket(s);
 
-  useEffect(() => {
-    if (!socket) return;
     const onConnect = () => setIsSocketConnected(true);
     const onDisconnect = () => setIsSocketConnected(false);
     const onConnectError = () => setIsSocketConnected(false);
 
-    if (socket.connected) {
+    if (s.connected) {
       setIsSocketConnected(true);
-    } else {
-      setIsSocketConnected(false);
     }
 
-    socket.on('connect', onConnect);
-    socket.on('disconnect', onDisconnect);
-    socket.on('connect_error', onConnectError);
+    s.on('connect', onConnect);
+    s.on('disconnect', onDisconnect);
+    s.on('connect_error', onConnectError);
 
     return () => {
-      socket.off('connect', onConnect);
-      socket.off('disconnect', onDisconnect);
-      socket.off('connect_error', onConnectError);
+      s.off('connect', onConnect);
+      s.off('disconnect', onDisconnect);
+      s.off('connect_error', onConnectError);
+      s.disconnect();
     };
-  }, [socket]);
+  }, [serverUrl]);
 
   const call = useWebGroupCall({
     socket,
@@ -68,7 +72,9 @@ export function App() {
   const handleUpdateServerUrl = (newUrl: string) => {
     if (!newUrl) return;
     const cleaned = newUrl.trim().replace(/\/+$/, '');
-    localStorage.setItem('groupcall_server_url', cleaned);
+    try {
+      localStorage.setItem('groupcall_server_url', cleaned);
+    } catch {}
     setServerUrl(cleaned);
   };
 

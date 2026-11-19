@@ -13,19 +13,10 @@ const FALLBACK_ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     {
       urls: [
-        'stun:13.126.239.227:3478',
         'stun:stun.l.google.com:19302',
         'stun:stun1.l.google.com:19302',
         'stun:stun2.l.google.com:19302',
       ],
-    },
-    {
-      urls: [
-        'turn:13.126.239.227:3478?transport=udp',
-        'turn:13.126.239.227:3478?transport=tcp',
-      ],
-      username: 'turnuser',
-      credential: 'techugo@123',
     },
   ],
 };
@@ -50,7 +41,7 @@ export function useWebGroupCall({
     isSpeaking: false,
     isHandRaised: false,
     isScreenSharing: false,
-    isHost: true,
+    isHost: false,
     stream: null,
   };
 
@@ -122,6 +113,69 @@ export function useWebGroupCall({
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  const remoteAnalysersRef = useRef<
+    Map<string, { analyser: AnalyserNode; dataArray: Uint8Array; source: MediaStreamAudioSourceNode }>
+  >(new Map());
+
+  const getOrCreateAudioContext = useCallback(() => {
+    if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        audioContextRef.current = new AudioCtx();
+      }
+    }
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume().catch(() => {});
+    }
+    return audioContextRef.current;
+  }, []);
+
+  const attachRemoteAudioAnalyser = useCallback(
+    (peerId: string, stream: MediaStream) => {
+      try {
+        const audioTracks = stream.getAudioTracks();
+        if (audioTracks.length === 0) return;
+        const ctx = getOrCreateAudioContext();
+        if (!ctx) return;
+
+        if (remoteAnalysersRef.current.has(peerId)) {
+          const old = remoteAnalysersRef.current.get(peerId);
+          try {
+            old?.source.disconnect();
+          } catch {}
+          remoteAnalysersRef.current.delete(peerId);
+        }
+
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.4;
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        remoteAnalysersRef.current.set(peerId, { analyser, dataArray, source });
+      } catch (e) {
+        console.warn('[Web Audio] Error setting up remote analyser for', peerId, e);
+      }
+    },
+    [getOrCreateAudioContext]
+  );
+
+  useEffect(() => {
+    const resumeAudio = () => {
+      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume().catch(() => {});
+      }
+    };
+    window.addEventListener('click', resumeAudio);
+    window.addEventListener('touchstart', resumeAudio);
+    window.addEventListener('keydown', resumeAudio);
+    return () => {
+      window.removeEventListener('click', resumeAudio);
+      window.removeEventListener('touchstart', resumeAudio);
+      window.removeEventListener('keydown', resumeAudio);
+    };
+  }, []);
 
   // ── Helper to upsert a participant into the list safely without duplicates ──
   const upsertParticipant = useCallback(
@@ -288,6 +342,19 @@ export function useWebGroupCall({
                 return p;
               }),
             }));
+          } else if (data.type === 'camera-toggle') {
+            const isCameraOff =
+              typeof data.isCameraOff === 'boolean' ? data.isCameraOff : !data.enabled;
+            setCallState((prev) => ({
+              ...prev,
+              participants: prev.participants.map((p) => {
+                const match =
+                  p.id === peerId ||
+                  p.socketId === peerId ||
+                  (data.userId && p.userId === data.userId);
+                return match ? { ...p, isCameraOff } : p;
+              }),
+            }));
           } else if (data.type === 'hand-raise') {
             const isHandRaised = !!data.isHandRaised;
             setCallState((prev) => ({
@@ -302,6 +369,8 @@ export function useWebGroupCall({
             }));
           } else if (data.type === 'screen-share') {
             const isScreenSharing = !!data.isScreenSharing;
+            const remoteCameraOff =
+              typeof data.isCameraOff === 'boolean' ? data.isCameraOff : undefined;
             setCallState((prev) => ({
               ...prev,
               participants: prev.participants.map((p) => {
@@ -313,7 +382,11 @@ export function useWebGroupCall({
                   ? {
                       ...p,
                       isScreenSharing,
-                      isCameraOff: isScreenSharing ? false : p.isCameraOff,
+                      isCameraOff: isScreenSharing
+                        ? false
+                        : remoteCameraOff !== undefined
+                        ? remoteCameraOff
+                        : p.isCameraOff,
                     }
                   : p;
               }),
@@ -353,53 +426,91 @@ export function useWebGroupCall({
     };
   }, [serverUrl]);
 
-  const setupAudioDetection = useCallback((stream: MediaStream) => {
-    try {
-      const audioTrack = stream.getAudioTracks()[0];
-      if (!audioTrack) return;
+  const setupAudioDetection = useCallback(
+    (stream: MediaStream) => {
+      try {
+        const audioTrack = stream.getAudioTracks()[0];
+        if (!audioTrack) return;
 
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
+        const ctx = getOrCreateAudioContext();
+        if (!ctx) return;
 
-      const ctx = new AudioCtx();
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.4;
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.4;
 
-      const source = ctx.createMediaStreamSource(stream);
-      source.connect(analyser);
+        const source = ctx.createMediaStreamSource(stream);
+        source.connect(analyser);
 
-      audioContextRef.current = ctx;
-      analyserRef.current = analyser;
+        analyserRef.current = analyser;
+        const localDataArray = new Uint8Array(analyser.frequencyBinCount);
 
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-      const checkAudioLevel = () => {
-        if (!analyserRef.current) return;
-        analyserRef.current.getByteFrequencyData(dataArray);
-
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
-        }
-        const average = sum / dataArray.length;
-        const isSpeaking = average > 18 && !stateRef.current.isMuted;
-
-        if (stateRef.current.localParticipant.isSpeaking !== isSpeaking) {
-          setCallState((prev) => ({
-            ...prev,
-            localParticipant: { ...prev.localParticipant, isSpeaking },
-          }));
+        if (animFrameRef.current) {
+          cancelAnimationFrame(animFrameRef.current);
         }
 
-        animFrameRef.current = requestAnimationFrame(checkAudioLevel);
-      };
+        const checkAudioLevel = () => {
+          // 1. Check local audio level
+          if (analyserRef.current) {
+            analyserRef.current.getByteFrequencyData(localDataArray);
+            let sum = 0;
+            for (let i = 0; i < localDataArray.length; i++) {
+              sum += localDataArray[i];
+            }
+            const avg = sum / localDataArray.length;
+            const isSpeaking = avg > 18 && !stateRef.current.isMuted;
 
-      checkAudioLevel();
-    } catch (e) {
-      console.warn('Audio detection not supported:', e);
-    }
-  }, []);
+            if (stateRef.current.localParticipant.isSpeaking !== isSpeaking) {
+              setCallState((prev) => ({
+                ...prev,
+                localParticipant: { ...prev.localParticipant, isSpeaking },
+              }));
+            }
+          }
+
+          // 2. Check remote audio levels from all connected peers
+          if (remoteAnalysersRef.current.size > 0) {
+            let hasChanged = false;
+            const nextParticipants = stateRef.current.participants.map((p) => {
+              const entry =
+                remoteAnalysersRef.current.get(p.id) ||
+                (p.socketId ? remoteAnalysersRef.current.get(p.socketId) : undefined) ||
+                (p.userId ? remoteAnalysersRef.current.get(p.userId) : undefined);
+
+              if (entry) {
+                entry.analyser.getByteFrequencyData(entry.dataArray as any);
+                let sum = 0;
+                for (let i = 0; i < entry.dataArray.length; i++) {
+                  sum += entry.dataArray[i];
+                }
+                const avg = sum / entry.dataArray.length;
+                const isSpeaking = avg > 18 && !p.isMuted;
+                if (p.isSpeaking !== isSpeaking) {
+                  hasChanged = true;
+                  return { ...p, isSpeaking };
+                }
+              }
+              return p;
+            });
+
+            if (hasChanged) {
+              setCallState((prev) => ({
+                ...prev,
+                participants: nextParticipants,
+              }));
+            }
+          }
+
+          animFrameRef.current = requestAnimationFrame(checkAudioLevel);
+        };
+
+        checkAudioLevel();
+      } catch (e) {
+        console.warn('Audio detection not supported:', e);
+      }
+    },
+    [getOrCreateAudioContext]
+  );
 
   // ── Helper to attach/bind local media tracks to peer transceivers ──
   const attachLocalTracksToPeer = useCallback(async (pc: RTCPeerConnection) => {
@@ -504,17 +615,41 @@ export function useWebGroupCall({
         setupDataChannel(remoteSocketId, event.channel);
       };
 
-      // Relay ICE candidates
+      // Handle ICE connection state changes and auto-restart on disconnect/failure
+      pc.oniceconnectionstatechange = () => {
+        const iceState = pc.iceConnectionState;
+        console.log(`[Web Mesh] ICE state for ${remoteSocketId}: ${iceState}`);
+        if (iceState === 'failed' || iceState === 'disconnected') {
+          console.warn(`[Web Mesh] ICE ${iceState} with ${remoteSocketId}. Triggering restartIce...`);
+          try {
+            if (typeof pc.restartIce === 'function') {
+              pc.restartIce();
+            }
+            if (pc.signalingState === 'stable') {
+              pc.createOffer({ iceRestart: true })
+                .then((offer) => pc.setLocalDescription(offer))
+                .then(() => {
+                  if (pc.localDescription) {
+                    socket?.emit('offer', {
+                      to: remoteSocketId,
+                      offer: { type: pc.localDescription.type, sdp: pc.localDescription.sdp },
+                    });
+                  }
+                })
+                .catch((err) => console.warn('[Web Mesh] restartIce offer failed:', err));
+            }
+          } catch (e) {
+            console.warn('[Web Mesh] restartIce error:', e);
+          }
+        }
+      };
+
+      // Relay ICE candidates without duplicate emissions
       pc.onicecandidate = (event) => {
         if (event.candidate && socket?.connected) {
           const candidateData = event.candidate.toJSON();
           socket.emit('ice-candidate', {
             to: remoteSocketId,
-            candidate: candidateData,
-          });
-          socket.emit('peer:ice-candidate', {
-            roomId: stateRef.current.roomId,
-            targetUserId: remoteSocketId,
             candidate: candidateData,
           });
         }
@@ -547,6 +682,11 @@ export function useWebGroupCall({
         // Create a new reference so React hooks and child components re-render immediately
         const freshStream = new MediaStream(stream.getTracks());
         peerStreamsRef.current.set(remoteSocketId, freshStream);
+
+        // Attach remote audio analyser for live speaking pulse
+        if (freshStream.getAudioTracks().length > 0) {
+          attachRemoteAudioAnalyser(remoteSocketId, freshStream);
+        }
 
         const hasVideo = freshStream.getVideoTracks().length > 0;
 
@@ -594,11 +734,6 @@ export function useWebGroupCall({
             to: remoteSocketId,
             offer: offerData,
           });
-          socket?.emit('peer:offer', {
-            roomId: stateRef.current.roomId,
-            targetUserId: remoteSocketId,
-            sdp: offerData,
-          });
         } catch (e) {
           console.error('Error creating offer for peer', remoteSocketId, e);
         }
@@ -606,7 +741,7 @@ export function useWebGroupCall({
 
       return pc;
     },
-    [currentUser.id, setupDataChannel, socket, upsertParticipant]
+    [attachRemoteAudioAnalyser, currentUser.id, setupDataChannel, socket, upsertParticipant]
   );
 
   // ── Join Group Call ──────────────────────────────────────────────
@@ -769,19 +904,6 @@ export function useWebGroupCall({
               }
             }
           );
-
-          socket.emit('room:join', {
-            roomId: roomCode,
-            user: {
-              id: currentUser.id,
-              name: effectiveName,
-              userName: effectiveName,
-              avatar: currentUser.avatar,
-              isMuted: initialMuted,
-              isCameraOff: actualCameraOff,
-              mode,
-            },
-          });
         };
 
         if (socket?.connected) {
@@ -799,6 +921,37 @@ export function useWebGroupCall({
     },
     [currentUser, socket, setupAudioDetection]
   );
+
+  // ── Auto Re-join on Socket Reconnection ─────────────────────────
+  useEffect(() => {
+    if (!socket) return;
+    const handleReconnect = () => {
+      console.log('[Socket] Reconnected! Checking active call status...');
+      if (stateRef.current.status === 'joined' && stateRef.current.roomId) {
+        console.log(`[Socket] Re-joining room ${stateRef.current.roomId} after reconnect`);
+        socket.emit('join-room', {
+          roomCode: stateRef.current.roomId,
+          roomId: stateRef.current.roomId,
+          userName: stateRef.current.localParticipant.name,
+          name: stateRef.current.localParticipant.name,
+          displayName: stateRef.current.localParticipant.name,
+          userId: currentUser.id,
+          user: {
+            id: currentUser.id,
+            name: stateRef.current.localParticipant.name,
+            userName: stateRef.current.localParticipant.name,
+          },
+          isCameraOff: stateRef.current.isCameraOff,
+          isMuted: stateRef.current.isMuted,
+        });
+      }
+    };
+
+    socket.on('connect', handleReconnect);
+    return () => {
+      socket.off('connect', handleReconnect);
+    };
+  }, [socket, currentUser.id]);
 
   // ── Change Display Name ──────────────────────────────────────────
   const changeName = useCallback(
@@ -825,7 +978,7 @@ export function useWebGroupCall({
         }
       });
 
-      // 2. Also emit over socket
+      // 2. Also emit over socket without duplicates
       if (socket?.connected) {
         const payload = {
           userName: trimmed,
@@ -836,8 +989,6 @@ export function useWebGroupCall({
           roomCode: stateRef.current.roomId,
         };
         socket.emit('change-name', payload);
-        socket.emit('peer:name-change', payload);
-        socket.emit('user:update-name', payload);
       }
     },
     [currentUser.id, socket]
@@ -857,6 +1008,12 @@ export function useWebGroupCall({
       audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;
     }
+    remoteAnalysersRef.current.forEach((val) => {
+      try {
+        val.source.disconnect();
+      } catch {}
+    });
+    remoteAnalysersRef.current.clear();
 
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -885,12 +1042,6 @@ export function useWebGroupCall({
   const leaveGroupCall = useCallback(() => {
     if (socket?.connected) {
       socket.emit('leave-room');
-      if (stateRef.current.roomId) {
-        socket.emit('room:leave', {
-          roomId: stateRef.current.roomId,
-          userId: currentUser.id,
-        });
-      }
     }
 
     cleanup();
@@ -905,7 +1056,7 @@ export function useWebGroupCall({
       durationSec: 0,
       isScreenSharing: false,
     }));
-  }, [cleanup, currentUser.id, socket]);
+  }, [cleanup, socket]);
 
   // ── Toggle Microphone ────────────────────────────────────────────
   const toggleMute = useCallback(() => {
@@ -1008,10 +1159,25 @@ export function useWebGroupCall({
       },
     }));
 
+    // Broadcast camera toggle over DataChannel to prevent remote tile freezing
+    const cameraMsg = JSON.stringify({
+      type: 'camera-toggle',
+      isCameraOff: nextCameraOff,
+      enabled: !nextCameraOff,
+      userId: currentUser.id,
+    });
+    dataChannelsRef.current.forEach((dc) => {
+      if (dc.readyState === 'open') {
+        try {
+          dc.send(cameraMsg);
+        } catch (e) {}
+      }
+    });
+
     if (socket?.connected) {
       socket.emit('toggle-video', { enabled: !nextCameraOff });
     }
-  }, [socket]);
+  }, [currentUser.id, socket]);
 
   // ── Toggle Screen Sharing ────────────────────────────────────────
   const toggleScreenShare = useCallback(async () => {
@@ -1052,10 +1218,11 @@ export function useWebGroupCall({
         },
       }));
 
-      // Broadcast screen share stopped to peers via DataChannel
+      // Broadcast screen share stopped with camera state to peers via DataChannel
       const msg = JSON.stringify({
         type: 'screen-share',
         isScreenSharing: false,
+        isCameraOff: stateRef.current.isCameraOff,
         userId: currentUser.id,
       });
       dataChannelsRef.current.forEach((dc) => {
@@ -1064,20 +1231,27 @@ export function useWebGroupCall({
         }
       });
       if (socket?.connected) {
-        socket.emit('toggle-screen-share', { enabled: false, userId: currentUser.id });
+        socket.emit('toggle-screen-share', {
+          enabled: false,
+          isScreenSharing: false,
+          isCameraOff: stateRef.current.isCameraOff,
+          userId: currentUser.id,
+        });
       }
     } else {
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({
-          video: {
-            displaySurface: 'monitor',
-          },
+          video: true,
           audio: false,
         });
         screenStreamRef.current = screenStream;
         setScreenStream(screenStream);
 
         const screenTrack = screenStream.getVideoTracks()[0];
+        if (screenTrack && 'contentHint' in screenTrack) {
+          screenTrack.contentHint = 'detail';
+        }
+
         screenTrack.onended = () => {
           toggleScreenShare();
         };
@@ -1121,6 +1295,7 @@ export function useWebGroupCall({
         const msg = JSON.stringify({
           type: 'screen-share',
           isScreenSharing: true,
+          isCameraOff: false,
           userId: currentUser.id,
         });
         dataChannelsRef.current.forEach((dc) => {
@@ -1129,7 +1304,12 @@ export function useWebGroupCall({
           }
         });
         if (socket?.connected) {
-          socket.emit('toggle-screen-share', { enabled: true, userId: currentUser.id });
+          socket.emit('toggle-screen-share', {
+            enabled: true,
+            isScreenSharing: true,
+            isCameraOff: false,
+            userId: currentUser.id,
+          });
         }
       } catch (err) {
         console.warn('Screen share canceled or failed:', err);
@@ -1163,7 +1343,7 @@ export function useWebGroupCall({
       }
     });
 
-    // 2. Also emit over socket as fallback
+    // 2. Also emit over socket as fallback (no duplicates)
     if (socket?.connected) {
       const payload = {
         roomId: stateRef.current.roomId,
@@ -1172,12 +1352,8 @@ export function useWebGroupCall({
         socketId: socket.id,
         id: socket.id,
         isHandRaised: nextHand,
-        enabled: nextHand,
-        raised: nextHand,
       };
-      socket.emit('peer:hand-raise', payload);
       socket.emit('hand-raise', payload);
-      socket.emit('raise-hand', payload);
     }
   }, [currentUser.id, socket]);
 
@@ -1197,6 +1373,8 @@ export function useWebGroupCall({
 
       console.log(`[Web Mesh] Received all-users list with ${rawUsers.length} peers`);
 
+      const isFirst = rawUsers.length === 0;
+
       setCallState((prev) => {
         let currentList = prev.participants;
         for (const u of rawUsers) {
@@ -1208,11 +1386,18 @@ export function useWebGroupCall({
             userId: u.userId || u.id,
             name: u.userName || u.name || `User_${uid.slice(0, 4)}`,
             isMuted: u.isMuted ?? false,
-            isCameraOff: u.isCameraOff ?? (prev.mode === 'audio'),
+            isCameraOff: typeof u.isCameraOff === 'boolean' ? u.isCameraOff : false,
             isHandRaised: u.isHandRaised ?? false,
           });
         }
-        return { ...prev, participants: currentList };
+        return {
+          ...prev,
+          participants: currentList,
+          localParticipant: {
+            ...prev.localParticipant,
+            isHost: isFirst,
+          },
+        };
       });
 
       // Joiner initiates offers to all existing peers
@@ -1250,7 +1435,7 @@ export function useWebGroupCall({
           socketId,
           userId,
           name: userName,
-          isCameraOff: prev.mode === 'audio',
+          isCameraOff: typeof payload.isCameraOff === 'boolean' ? payload.isCameraOff : false,
         }),
       }));
 
@@ -1282,11 +1467,6 @@ export function useWebGroupCall({
         socket.emit('answer', {
           to: peerId,
           answer: answerData,
-        });
-        socket.emit('peer:answer', {
-          roomId: stateRef.current.roomId,
-          targetUserId: peerId,
-          sdp: answerData,
         });
       } catch (e) {
         console.error('Error handling offer from peer:', peerId, e);
@@ -1433,6 +1613,35 @@ export function useWebGroupCall({
       }));
     };
 
+    // 10. Screen Share Toggle Listener (from Socket)
+    const onPeerToggleScreenShare = (payload: any = {}) => {
+      const peerId = payload.socketId || payload.userId || payload.id;
+      if (!peerId) return;
+      const isScreenSharing =
+        typeof payload.enabled === 'boolean'
+          ? payload.enabled
+          : !!payload.isScreenSharing;
+      const remoteCameraOff =
+        typeof payload.isCameraOff === 'boolean' ? payload.isCameraOff : undefined;
+
+      setCallState((prev) => ({
+        ...prev,
+        participants: prev.participants.map((p) =>
+          p.id === peerId || p.socketId === peerId || p.userId === peerId
+            ? {
+                ...p,
+                isScreenSharing,
+                isCameraOff: isScreenSharing
+                  ? false
+                  : remoteCameraOff !== undefined
+                  ? remoteCameraOff
+                  : p.isCameraOff,
+              }
+            : p
+        ),
+      }));
+    };
+
     // Register standard and compatible socket events
     socket.on('all-users', onAllUsers);
     socket.on('room:peers', onAllUsers);
@@ -1461,6 +1670,9 @@ export function useWebGroupCall({
 
     socket.on('toggle-video', onPeerToggleVideo);
     socket.on('peer:toggle-video', onPeerToggleVideo);
+
+    socket.on('toggle-screen-share', onPeerToggleScreenShare);
+    socket.on('peer:toggle-screen-share', onPeerToggleScreenShare);
 
     socket.on('peer:media-toggle', ({ userId, isMuted, isCameraOff }: any) => {
       if (typeof isMuted === 'boolean') onPeerToggleAudio({ socketId: userId, enabled: !isMuted });
@@ -1492,6 +1704,8 @@ export function useWebGroupCall({
       socket.off('peer:toggle-audio', onPeerToggleAudio);
       socket.off('toggle-video', onPeerToggleVideo);
       socket.off('peer:toggle-video', onPeerToggleVideo);
+      socket.off('toggle-screen-share', onPeerToggleScreenShare);
+      socket.off('peer:toggle-screen-share', onPeerToggleScreenShare);
       socket.off('peer:media-toggle');
       socket.off('peer:hand-raise', onPeerHandRaise);
       socket.off('hand-raise', onPeerHandRaise);

@@ -1422,7 +1422,7 @@ html, body, #root, .app-root {
 
 .status-speaking { color: var(--speaking-green); font-weight: 700; }
 .status-muted { color: var(--danger); }
-.status-connected { color: var(--text-muted); }
+.drawer-status-connected { color: var(--text-muted); }
 
 .participant-icons {
   display: flex;

@@ -135,19 +135,8 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
       dedupedRemotes.push(r);
     }
 
-    // Prioritize screen sharers, active streams, and hand-raisers ahead of idle/ghost participants
-    dedupedRemotes.sort((a, b) => {
-      // Screen sharer comes first!
-      if (a.isScreenSharing !== b.isScreenSharing) return a.isScreenSharing ? -1 : 1;
-
-      const aHasStream = !!(a.stream && a.stream.getTracks().length > 0);
-      const bHasStream = !!(b.stream && b.stream.getTracks().length > 0);
-      if (aHasStream !== bHasStream) return aHasStream ? -1 : 1;
-
-      if (a.isHandRaised !== b.isHandRaised) return a.isHandRaised ? -1 : 1;
-
-      return 0;
-    });
+    // Stable order by ID so tiles maintain a predictable layout and do not jump when hands are raised
+    dedupedRemotes.sort((a, b) => a.id.localeCompare(b.id));
 
     return [localWithStream, ...dedupedRemotes];
   }, [
@@ -517,20 +506,23 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
             </button>
           )}
 
-          {/* Screen Share */}
-          {callState.mode === 'video' && (
-            <button
-              type="button"
-              className={`dock-btn ${callState.isScreenSharing ? 'dock-btn-active' : ''}`}
-              onClick={toggleScreenShare}
-              title={callState.isScreenSharing ? 'Stop Presenting' : 'Share Screen'}
-            >
-              <MonitorUp size={20} />
-              <span className="dock-btn-label">
-                {callState.isScreenSharing ? 'Stop Share' : 'Share'}
-              </span>
-            </button>
-          )}
+          {/* Screen Share (Only rendered if getDisplayMedia is supported on this browser/device) */}
+          {callState.mode === 'video' &&
+            typeof navigator !== 'undefined' &&
+            !!navigator.mediaDevices &&
+            typeof navigator.mediaDevices.getDisplayMedia === 'function' && (
+              <button
+                type="button"
+                className={`dock-btn ${callState.isScreenSharing ? 'dock-btn-active' : ''}`}
+                onClick={toggleScreenShare}
+                title={callState.isScreenSharing ? 'Stop Presenting' : 'Share Screen'}
+              >
+                <MonitorUp size={20} />
+                <span className="dock-btn-label">
+                  {callState.isScreenSharing ? 'Stop Share' : 'Share'}
+                </span>
+              </button>
+            )}
 
           {/* Raise Hand */}
           <button
