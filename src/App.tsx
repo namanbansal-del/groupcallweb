@@ -91,7 +91,7 @@ export function App() {
     call.callState.status === 'joining' || call.callState.status === 'joined';
 
   return (
-    <div className="app-root">
+    <div className={`app-root ${!isInCall ? 'in-lobby' : ''}`}>
       {isInCall ? (
         <ActiveCall call={call} />
       ) : (

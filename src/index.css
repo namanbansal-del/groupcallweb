@@ -39,30 +39,40 @@ html, body, #root, .app-root {
   -webkit-font-smoothing: antialiased;
 }
 
+.app-root.in-lobby {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* ── Lobby Layout ──────────────────────────────────────────────────────── */
 .lobby-wrapper {
   display: flex;
-  align-items: center;
   justify-content: center;
-  min-height: 100vh;
-  padding: 24px;
+  align-items: flex-start;
+  width: 100%;
+  min-height: 100%;
+  padding: 20px 16px;
   background: radial-gradient(circle at top, #EFF6FF 0%, #F8FAFC 70%);
   overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 .lobby-card {
+  margin: auto;
   width: 100%;
-  max-width: 520px;
+  max-width: 480px;
   background: var(--bg-card);
   border: 1px solid var(--border-card);
-  border-radius: 24px;
-  padding: 36px 32px;
+  border-radius: 20px;
+  padding: 22px 26px;
   box-shadow: 0 12px 36px -4px rgba(15, 23, 42, 0.08), 0 4px 16px -2px rgba(15, 23, 42, 0.04);
 }
 
 .lobby-header {
   text-align: center;
-  margin-bottom: 24px;
+  margin-bottom: 14px;
 }
 
 .lobby-badge {
@@ -71,34 +81,34 @@ html, body, #root, .app-root {
   gap: 8px;
   background: var(--primary-light);
   color: var(--primary);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  padding: 6px 16px;
+  padding: 4px 14px;
   border-radius: 9999px;
-  margin-bottom: 12px;
-}
-
-.lobby-title {
-  font-size: 24px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--text-primary);
   margin-bottom: 8px;
 }
 
+.lobby-title {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
 .lobby-subtitle {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: 1.4;
 }
 
 .mode-toggle-group {
   display: flex;
   background: var(--bg-card-secondary);
-  border-radius: 14px;
+  border-radius: 12px;
   padding: 4px;
   gap: 6px;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 
 .mode-btn {
@@ -107,13 +117,13 @@ html, body, #root, .app-root {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  border-radius: 10px;
+  border-radius: 9px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -128,10 +138,11 @@ html, body, #root, .app-root {
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
+  max-height: 190px;
   background: #0F172A;
-  border-radius: 16px;
+  border-radius: 14px;
   overflow: hidden;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .preview-video {
@@ -201,26 +212,26 @@ html, body, #root, .app-root {
 .lobby-form {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .form-label {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--text-primary);
 }
 
 .form-input {
-  padding: 12px 16px;
+  padding: 10px 14px;
   border: 1.5px solid var(--border-card);
-  border-radius: 12px;
-  font-size: 15px;
+  border-radius: 10px;
+  font-size: 14px;
   color: var(--text-primary);
   background: var(--bg-app);
   outline: none;
@@ -238,16 +249,16 @@ html, body, #root, .app-root {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 14px 20px;
+  gap: 8px;
+  padding: 12px 18px;
   background: var(--primary);
   color: #FFFFFF;
   border: none;
-  border-radius: 14px;
+  border-radius: 12px;
   font-size: 15px;
   font-weight: 700;
   cursor: pointer;
-  margin-top: 8px;
+  margin-top: 4px;
   transition: background-color 0.2s, transform 0.1s;
 }
 
