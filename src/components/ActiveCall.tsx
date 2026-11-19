@@ -184,19 +184,9 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
       {/* Top Navigation Bar */}
       <header className="call-header">
         <div className="call-header-left">
-          <div className="room-identity">
-            <h1 className="room-name">{callState.roomId || 'Group Meeting'}</h1>
-            <button
-              type="button"
-              className="btn-header-tool"
-              onClick={handleCopyRoomCode}
-              title="Copy Room ID to invite others"
-              style={{ padding: '4px 8px', fontSize: '0.75rem', gap: '4px' }}
-            >
-              {copiedRoom ? <Check size={13} color="#10B981" /> : <Copy size={13} />}
-              <span>{copiedRoom ? 'Copied' : 'Copy'}</span>
-            </button>
-            <span className="room-timer">{formatDuration(callState.durationSec)}</span>
+          <div className="call-brand-wrap">
+            <span className="call-live-dot" />
+            <span className="call-brand-title">GroupCall</span>
           </div>
         </div>
 
@@ -384,6 +374,23 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
 
       {/* Bottom Floating Control Dock */}
       <footer className="call-footer-dock">
+        {/* Left: Room Identity, Timer & Copy Code */}
+        <div className="dock-room-info">
+          <span className="dock-room-name" title={callState.roomId || 'Group Meeting'}>
+            {callState.roomId || 'Group Meeting'}
+          </span>
+          <span className="dock-room-timer">{formatDuration(callState.durationSec)}</span>
+          <button
+            type="button"
+            className="btn-dock-copy"
+            onClick={handleCopyRoomCode}
+            title="Copy Room ID to invite others"
+          >
+            {copiedRoom ? <Check size={12} color="#10B981" /> : <Copy size={12} />}
+            <span className="dock-copy-label">{copiedRoom ? 'Copied' : 'Copy'}</span>
+          </button>
+        </div>
+
         <div className="dock-container">
           {/* Mute Mic */}
           <button
@@ -463,6 +470,9 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
             <span className="dock-btn-label">Leave</span>
           </button>
         </div>
+
+        {/* Right Spacer for balanced layout on desktop */}
+        <div className="dock-right-spacer" />
       </footer>
 
       {/* Leave Call Confirmation Dialog */}

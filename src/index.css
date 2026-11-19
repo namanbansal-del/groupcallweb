@@ -40,9 +40,11 @@ html, body, #root, .app-root {
 }
 
 .app-root.in-lobby {
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
+  height: 100%;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* ── Lobby Layout ──────────────────────────────────────────────────────── */
@@ -51,64 +53,85 @@ html, body, #root, .app-root {
   justify-content: center;
   align-items: flex-start;
   width: 100%;
-  min-height: 100%;
-  padding: 20px 16px;
+  height: 100%;
+  height: 100dvh;
+  padding: 14px 16px;
   background: radial-gradient(circle at top, #EFF6FF 0%, #F8FAFC 70%);
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #CBD5E1 transparent;
+}
+
+.lobby-wrapper::-webkit-scrollbar {
+  width: 8px;
+}
+
+.lobby-wrapper::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.lobby-wrapper::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 4px;
+}
+
+.lobby-wrapper::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
 }
 
 .lobby-card {
   margin: auto;
   width: 100%;
-  max-width: 480px;
+  max-width: 460px;
   background: var(--bg-card);
   border: 1px solid var(--border-card);
-  border-radius: 20px;
-  padding: 22px 26px;
-  box-shadow: 0 12px 36px -4px rgba(15, 23, 42, 0.08), 0 4px 16px -2px rgba(15, 23, 42, 0.04);
+  border-radius: 18px;
+  padding: 18px 22px;
+  box-shadow: 0 10px 30px -4px rgba(15, 23, 42, 0.08), 0 4px 12px -2px rgba(15, 23, 42, 0.04);
 }
 
 .lobby-header {
   text-align: center;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .lobby-badge {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   background: var(--primary-light);
   color: var(--primary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
-  padding: 4px 14px;
+  padding: 3px 12px;
   border-radius: 9999px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .lobby-title {
-  font-size: 22px;
+  font-size: 19px;
   font-weight: 800;
   letter-spacing: -0.02em;
   color: var(--text-primary);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .lobby-subtitle {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-secondary);
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
 .mode-toggle-group {
   display: flex;
   background: var(--bg-card-secondary);
-  border-radius: 12px;
-  padding: 4px;
-  gap: 6px;
-  margin-bottom: 14px;
+  border-radius: 10px;
+  padding: 3px;
+  gap: 5px;
+  margin-bottom: 10px;
 }
 
 .mode-btn {
@@ -116,14 +139,14 @@ html, body, #root, .app-root {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 6px;
+  padding: 6px 10px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
-  border-radius: 9px;
+  border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -131,18 +154,18 @@ html, body, #root, .app-root {
 .mode-btn-active {
   background: var(--bg-card);
   color: var(--primary);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
 
 .preview-container {
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
-  max-height: 190px;
+  max-height: clamp(120px, 20vh, 150px);
   background: #0F172A;
-  border-radius: 14px;
+  border-radius: 12px;
   overflow: hidden;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .preview-video {
@@ -212,26 +235,26 @@ html, body, #root, .app-root {
 .lobby-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .form-label {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
   color: var(--text-primary);
 }
 
 .form-input {
-  padding: 10px 14px;
+  padding: 8px 12px;
   border: 1.5px solid var(--border-card);
-  border-radius: 10px;
-  font-size: 14px;
+  border-radius: 9px;
+  font-size: 13.5px;
   color: var(--text-primary);
   background: var(--bg-app);
   outline: none;
@@ -250,15 +273,15 @@ html, body, #root, .app-root {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 12px 18px;
+  padding: 10px 16px;
   background: var(--primary);
   color: #FFFFFF;
   border: none;
-  border-radius: 12px;
-  font-size: 15px;
+  border-radius: 10px;
+  font-size: 14px;
   font-weight: 700;
   cursor: pointer;
-  margin-top: 4px;
+  margin-top: 2px;
   transition: background-color 0.2s, transform 0.1s;
 }
 
@@ -271,10 +294,10 @@ html, body, #root, .app-root {
 }
 
 .server-config-section {
-  margin-top: 16px;
+  margin-top: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .server-status-bar {
@@ -446,7 +469,7 @@ html, body, #root, .app-root {
 
 .call-header {
   flex-shrink: 0;
-  height: 56px;
+  height: 52px;
   padding: 0 16px;
   display: flex;
   align-items: center;
@@ -454,6 +477,33 @@ html, body, #root, .app-root {
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-card);
   z-index: 10;
+}
+
+.call-brand-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.call-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10B981;
+  box-shadow: 0 0 0 2.5px rgba(16, 185, 129, 0.25);
+  animation: pulseDot 2s infinite ease-in-out;
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(0.9); }
+}
+
+.call-brand-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
 }
 
 .room-identity {
@@ -1001,16 +1051,70 @@ html, body, #root, .app-root {
 /* ── Floating Footer Dock ──────────────────────────────────────────────── */
 .call-footer-dock {
   flex-shrink: 0;
-  min-height: 68px;
+  min-height: 66px;
   background: var(--bg-card);
   border-top: 1px solid var(--border-card);
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 6px 12px;
+  justify-content: space-between;
+  padding: 6px 20px;
   padding-bottom: max(8px, env(safe-area-inset-bottom));
   z-index: 30;
   width: 100%;
+  box-sizing: border-box;
+}
+
+/* Left: Room Identity, Timer & Copy in Dock */
+.dock-room-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 180px;
+}
+
+.dock-room-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-room-timer {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-card-secondary);
+  padding: 3px 7px;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.btn-dock-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-light);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-dock-copy:hover {
+  background: #DBEAFE;
+}
+
+.dock-copy-label {
+  font-size: 11px;
 }
 
 .dock-container {
@@ -1018,8 +1122,14 @@ html, body, #root, .app-root {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  width: 100%;
+  width: auto;
   max-width: 580px;
+}
+
+/* Right Spacer on desktop for visual balance with room info */
+.dock-right-spacer {
+  min-width: 180px;
+  display: block;
 }
 
 .dock-btn {
@@ -1397,18 +1507,43 @@ html, body, #root, .app-root {
   }
 
   .call-footer-dock {
-    min-height: 60px;
-    padding: 5px 8px;
-    padding-bottom: max(6px, env(safe-area-inset-bottom));
-  }
-
-  .dock-container {
+    flex-direction: column;
+    min-height: auto;
+    padding: 6px 8px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
     gap: 6px;
   }
 
+  .dock-room-info {
+    min-width: unset;
+    width: 100%;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .dock-room-name {
+    font-size: 12px;
+    max-width: 120px;
+  }
+
+  .dock-room-timer {
+    font-size: 11px;
+    padding: 2px 6px;
+  }
+
+  .dock-right-spacer {
+    display: none;
+  }
+
+  .dock-container {
+    width: 100%;
+    gap: 4px;
+    justify-content: space-between;
+  }
+
   .dock-btn {
-    min-width: 44px;
-    padding: 6px 2px;
+    min-width: 40px;
+    padding: 5px 2px;
     border-radius: 10px;
   }
 
@@ -1421,12 +1556,12 @@ html, body, #root, .app-root {
   }
 
   .lobby-card {
-    padding: 24px 18px;
-    border-radius: 18px;
+    padding: 16px 14px;
+    border-radius: 16px;
   }
 
   .lobby-title {
-    font-size: 20px;
+    font-size: 18px;
   }
 }
 
