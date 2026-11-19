@@ -120,9 +120,8 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
     callState.participants,
   ]);
 
-  // Video pagination: 6 per page on desktop
-  // Audio pagination: 9 per page
-  const pageSize = callState.mode === 'video' ? 6 : 9;
+  // Max 16 participants in one screen before pagination
+  const pageSize = 16;
   const totalPages = Math.max(1, Math.ceil(allUsers.length / pageSize));
 
   // Chunk users into pages
@@ -270,7 +269,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
             />
           ) : callState.mode === 'video' ? (
             <div
-              className={`web-video-grid grid-count-${Math.min(currentUsers.length, 6)}`}
+              className={`web-video-grid grid-count-${Math.min(currentUsers.length, 16)}`}
             >
               {currentUsers.map((user) => (
                 <div key={user.id} className="video-grid-cell">
@@ -295,7 +294,9 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
             </div>
           ) : (
             /* Multi-User Audio Grid View */
-            <div className="web-voice-grid">
+            <div
+              className={`web-voice-grid voice-grid-count-${Math.min(currentUsers.length, 16)}`}
+            >
               {currentUsers.map((user) => (
                 <div key={user.id} className="voice-grid-cell">
                   <ParticipantVoiceCard
