@@ -188,6 +188,32 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
     ? callState.localParticipant.name
     : screenshareUser?.name || 'Participant';
 
+  // Presenter participant & camera details for the bottom-right PiP frame
+  const presenterParticipant = isLocalScreenSharing
+    ? callState.localParticipant
+    : screenshareUser || callState.localParticipant;
+
+  const remotePresenterCameraStream = useMemo(() => {
+    if (!screenshareUser?.stream) return null;
+    const vTracks = screenshareUser.stream.getVideoTracks();
+    if (vTracks.length > 1) {
+      return new MediaStream([vTracks[1]]);
+    }
+    return null;
+  }, [screenshareUser?.stream]);
+
+  const presenterCameraStream = isLocalScreenSharing
+    ? localStream
+    : remotePresenterCameraStream;
+
+  const presenterIsCameraOff = isLocalScreenSharing
+    ? callState.isCameraOff
+    : (screenshareUser?.isCameraOff ?? true);
+
+  const presenterIsMuted = isLocalScreenSharing
+    ? callState.isMuted
+    : (screenshareUser?.isMuted ?? false);
+
   const handleOpenRename = () => {
     setNewNameInput(callState.localParticipant.name);
     setIsEditingName(true);
@@ -263,12 +289,12 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
               screenStream={presentationStream}
               presenterName={presentationPresenterName}
               isLocalPresenter={isLocalScreenSharing}
-              cameraStream={localStream}
-              cameraParticipant={callState.localParticipant}
-              isCameraOff={callState.isCameraOff}
-              isMuted={callState.isMuted}
+              cameraStream={presenterCameraStream}
+              cameraParticipant={presenterParticipant}
+              isCameraOff={presenterIsCameraOff}
+              isMuted={presenterIsMuted}
               onStopPresenting={isLocalScreenSharing ? toggleScreenShare : undefined}
-              onRename={handleOpenRename}
+              onRename={isLocalScreenSharing ? handleOpenRename : undefined}
             />
           ) : callState.mode === 'video' ? (
             pinnedId && allUsers.some((u) => u.id === pinnedId) ? (

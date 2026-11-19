@@ -121,7 +121,7 @@ export const PresentationStage: React.FC<PresentationStageProps> = ({
               autoPlay
               playsInline
               muted
-              className="pip-camera-video video-mirrored"
+              className={`pip-camera-video ${isLocalPresenter ? 'video-mirrored' : ''}`}
             />
           ) : (
             <div className="pip-avatar-fallback">
