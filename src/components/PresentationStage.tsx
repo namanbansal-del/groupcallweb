@@ -10,6 +10,7 @@ interface PresentationStageProps {
   cameraParticipant: Participant;
   isCameraOff: boolean;
   isMuted: boolean;
+  isVirtualBgActive?: boolean;
   onStopPresenting?: () => void;
   onRename?: () => void;
 }
@@ -22,6 +23,7 @@ export const PresentationStage: React.FC<PresentationStageProps> = ({
   cameraParticipant,
   isCameraOff,
   isMuted,
+  isVirtualBgActive = false,
   onStopPresenting,
   onRename,
 }) => {
@@ -121,7 +123,7 @@ export const PresentationStage: React.FC<PresentationStageProps> = ({
               autoPlay
               playsInline
               muted
-              className={`pip-camera-video ${isLocalPresenter ? 'video-mirrored' : ''}`}
+              className={`pip-camera-video ${isLocalPresenter && !isVirtualBgActive ? 'video-mirrored' : ''}`}
             />
           ) : (
             <div className="pip-avatar-fallback">

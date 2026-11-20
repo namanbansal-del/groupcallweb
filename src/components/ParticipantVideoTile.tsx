@@ -5,12 +5,14 @@ import type { Participant } from '../types';
 interface ParticipantVideoTileProps {
   participant: Participant;
   isLocal?: boolean;
+  isVirtualBgActive?: boolean;
   onRename?: () => void;
 }
 
 export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
   participant,
   isLocal = false,
+  isVirtualBgActive = false,
   onRename,
 }) => {
   const { name, isMuted, isCameraOff, isSpeaking, isHandRaised, isScreenSharing, stream } =
@@ -138,6 +140,8 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
   // Video feed is actively visible only when frames are rendering
   const isVideoRendering = showVideo && (isLocal || hasFrames);
 
+  const shouldMirror = isLocal && !isScreenSharing && !isVirtualBgActive;
+
   return (
     <div
       className={`video-tile-wrap ${isSpeaking && !isMuted ? 'speaking-active' : ''}`}
@@ -147,7 +151,7 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
         autoPlay
         playsInline
         muted={true}
-        className={`video-elem ${isLocal && !isScreenSharing ? 'video-mirrored' : ''} ${
+        className={`video-elem ${shouldMirror ? 'video-mirrored' : ''} ${
           isScreenSharing ? 'video-screenshare' : ''
         }`}
         style={{

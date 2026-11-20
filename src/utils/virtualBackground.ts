@@ -171,27 +171,37 @@ export class VirtualBackgroundProcessor {
     ctx.save();
     ctx.clearRect(0, 0, width, height);
 
-    // 1. Draw the segmentation mask of the person
+    // 1. Draw the segmentation mask & person horizontally mirrored so user movements feel natural like a mirror
+    ctx.save();
+    ctx.translate(width, 0);
+    ctx.scale(-1, 1);
     ctx.drawImage(results.segmentationMask, 0, 0, width, height);
-
-    // 2. Only keep pixels of the person inside the mask
     ctx.globalCompositeOperation = 'source-in';
     ctx.drawImage(results.image, 0, 0, width, height);
+    ctx.restore();
 
-    // 3. Draw background behind the segmented person
+    // 2. Draw background behind the segmented person
     ctx.globalCompositeOperation = 'destination-over';
 
     if (this.currentMode === 'blur-light') {
+      ctx.save();
+      ctx.translate(width, 0);
+      ctx.scale(-1, 1);
       ctx.filter = 'blur(8px)';
       ctx.drawImage(results.image, 0, 0, width, height);
-      ctx.filter = 'none';
+      ctx.restore();
     } else if (this.currentMode === 'blur-heavy') {
+      ctx.save();
+      ctx.translate(width, 0);
+      ctx.scale(-1, 1);
       ctx.filter = 'blur(18px)';
       ctx.drawImage(results.image, 0, 0, width, height);
-      ctx.filter = 'none';
+      ctx.restore();
     } else if (this.currentMode === 'image-techugo' && this.techugoImage && this.techugoImage.complete) {
+      // Draw background image in original, non-reversed orientation (never flipped)
       ctx.drawImage(this.techugoImage, 0, 0, width, height);
     } else if (this.currentMode === 'image-custom' && this.customImage && this.customImage.complete) {
+      // Draw custom background image in original, non-reversed orientation (never flipped)
       ctx.drawImage(this.customImage, 0, 0, width, height);
     } else {
       // Default fallback: subtle dark background

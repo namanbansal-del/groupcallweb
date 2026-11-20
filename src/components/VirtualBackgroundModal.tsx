@@ -84,7 +84,7 @@ export const VirtualBackgroundModal: React.FC<VirtualBackgroundModalProps> = ({
             autoPlay
             playsInline
             muted
-            className="vb-preview-video video-mirrored"
+            className={`vb-preview-video ${currentMode === 'none' ? 'video-mirrored' : ''}`}
           />
           <div className="vb-preview-badge">
             <Eye size={13} />
