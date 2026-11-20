@@ -15,6 +15,7 @@ export interface Participant {
   isScreenSharing?: boolean;
   isHost?: boolean;
   stream?: MediaStream | null;
+  screenStream?: MediaStream | null;
 }
 
 export interface GroupCallState {

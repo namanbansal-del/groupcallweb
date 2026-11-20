@@ -1,16 +1,19 @@
-import React, { useEffect, useRef } from 'react';
-import { MonitorUp, MicOff, Hand, Edit2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { MonitorUp, MicOff, Hand, Edit2, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Participant } from '../types';
+import { ParticipantVideoTile } from './ParticipantVideoTile';
 
 interface PresentationStageProps {
   screenStream: MediaStream | null;
   presenterName: string;
   isLocalPresenter: boolean;
-  cameraStream: MediaStream | null;
+  cameraStream?: MediaStream | null;
   cameraParticipant: Participant;
   isCameraOff: boolean;
   isMuted: boolean;
   isVirtualBgActive?: boolean;
+  participants: Participant[];
+  localParticipantId: string;
   onStopPresenting?: () => void;
   onRename?: () => void;
 }
@@ -24,11 +27,23 @@ export const PresentationStage: React.FC<PresentationStageProps> = ({
   isCameraOff,
   isMuted,
   isVirtualBgActive = false,
+  participants,
+  localParticipantId,
   onStopPresenting,
   onRename,
 }) => {
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Pagination for the top participant strip (4 to 5 visible per page)
+  const [stripPage, setStripPage] = useState(0);
+  const stripPageSize = 5;
+  const totalStripPages = Math.max(1, Math.ceil(participants.length / stripPageSize));
+  const safeStripPage = Math.min(stripPage, totalStripPages - 1);
+  const currentStripUsers = participants.slice(
+    safeStripPage * stripPageSize,
+    (safeStripPage + 1) * stripPageSize
+  );
 
   // Hook up full screen shared screen stream
   useEffect(() => {
@@ -85,6 +100,54 @@ export const PresentationStage: React.FC<PresentationStageProps> = ({
 
   return (
     <div className="presentation-stage-container">
+      {/* Top Carousel Strip: 4 to 5 Participant Video Tiles with Pagination */}
+      {participants.length > 0 && (
+        <div className="presentation-participants-strip">
+          {totalStripPages > 1 && (
+            <button
+              type="button"
+              className="strip-arrow-btn strip-arrow-left"
+              disabled={safeStripPage === 0}
+              onClick={() => setStripPage((p) => Math.max(0, p - 1))}
+              aria-label="Previous participants page"
+            >
+              <ChevronLeft size={18} />
+            </button>
+          )}
+
+          <div className={`presentation-strip-carousel strip-count-${currentStripUsers.length}`}>
+            {currentStripUsers.map((user) => (
+              <div key={user.id} className="presentation-strip-cell">
+                <ParticipantVideoTile
+                  participant={user}
+                  isLocal={user.id === localParticipantId}
+                  isVirtualBgActive={user.id === localParticipantId && isVirtualBgActive}
+                  onRename={user.id === localParticipantId ? onRename : undefined}
+                />
+              </div>
+            ))}
+          </div>
+
+          {totalStripPages > 1 && (
+            <button
+              type="button"
+              className="strip-arrow-btn strip-arrow-right"
+              disabled={safeStripPage >= totalStripPages - 1}
+              onClick={() => setStripPage((p) => Math.min(totalStripPages - 1, p + 1))}
+              aria-label="Next participants page"
+            >
+              <ChevronRight size={18} />
+            </button>
+          )}
+
+          {totalStripPages > 1 && (
+            <div className="strip-page-indicator">
+              {safeStripPage + 1}/{totalStripPages}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Full Screen Shared Screen Area */}
       <div className="presentation-screen-wrapper">
         <video

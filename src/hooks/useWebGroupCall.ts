@@ -84,6 +84,7 @@ export function useWebGroupCall({
   const screenStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const peerStreamsRef = useRef<Map<string, MediaStream>>(new Map());
+  const peerScreenStreamsRef = useRef<Map<string, MediaStream>>(new Map());
   const dataChannelsRef = useRef<Map<string, RTCDataChannel>>(new Map());
   const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const timerRef = useRef<number | null>(null);
@@ -193,7 +194,9 @@ export function useWebGroupCall({
         isMuted?: boolean;
         isCameraOff?: boolean;
         isHandRaised?: boolean;
+        isScreenSharing?: boolean;
         stream?: MediaStream | null;
+        screenStream?: MediaStream | null;
       }
     ): Participant[] => {
       const myUserId = currentUser.id;
@@ -241,7 +244,9 @@ export function useWebGroupCall({
           isMuted: typeof info.isMuted === 'boolean' ? info.isMuted : existing.isMuted,
           isCameraOff: typeof info.isCameraOff === 'boolean' ? info.isCameraOff : existing.isCameraOff,
           isHandRaised: typeof info.isHandRaised === 'boolean' ? info.isHandRaised : existing.isHandRaised,
+          isScreenSharing: typeof info.isScreenSharing === 'boolean' ? info.isScreenSharing : existing.isScreenSharing,
           stream: info.stream !== undefined ? info.stream : existing.stream,
+          screenStream: info.screenStream !== undefined ? info.screenStream : existing.screenStream,
         };
         return updated;
       }
@@ -257,9 +262,10 @@ export function useWebGroupCall({
           isCameraOff: info.isCameraOff ?? false,
           isSpeaking: false,
           isHandRaised: info.isHandRaised ?? false,
-          isScreenSharing: false,
+          isScreenSharing: info.isScreenSharing ?? false,
           isHost: false,
           stream: info.stream || null,
+          screenStream: info.screenStream || null,
         },
       ];
     },
@@ -518,13 +524,12 @@ export function useWebGroupCall({
 
   // ── Helper to attach/bind local media tracks to peer transceivers ──
   const attachLocalTracksToPeer = useCallback(async (pc: RTCPeerConnection) => {
-    const stream =
-      stateRef.current.isScreenSharing && screenStreamRef.current
-        ? screenStreamRef.current
-        : localStreamRef.current;
-
     const audioTrack = localStreamRef.current?.getAudioTracks()[0];
-    const videoTrack = stream?.getVideoTracks()[0];
+    const cameraTrack = localStreamRef.current?.getVideoTracks()[0];
+    const screenTrack =
+      stateRef.current.isScreenSharing && screenStreamRef.current
+        ? screenStreamRef.current.getVideoTracks()[0]
+        : null;
 
     const transceivers = pc.getTransceivers();
 
@@ -543,19 +548,33 @@ export function useWebGroupCall({
       } catch (e) {}
     }
 
-    // 2. Video Transceiver
-    const videoTransceiver = transceivers.find(
-      (t) => t.receiver.track?.kind === 'video' || t.sender.track?.kind === 'video' || t.mid === '1'
+    // 2. Video Transceivers (Index 0 = Camera, Index 1 = Screen Share)
+    const videoTransceivers = transceivers.filter(
+      (t) =>
+        t.receiver.track?.kind === 'video' ||
+        t.sender.track?.kind === 'video' ||
+        t.mid === '1' ||
+        t.mid === '2'
     );
-    if (videoTransceiver && videoTransceiver.sender) {
-      videoTransceiver.direction = 'sendrecv';
-      if (videoTrack && videoTransceiver.sender.track !== videoTrack) {
-        await videoTransceiver.sender.replaceTrack(videoTrack).catch(() => {});
+
+    // Video Transceiver 0: Camera Video
+    if (videoTransceivers[0] && videoTransceivers[0].sender) {
+      videoTransceivers[0].direction = 'sendrecv';
+      if (cameraTrack && videoTransceivers[0].sender.track !== cameraTrack) {
+        await videoTransceivers[0].sender.replaceTrack(cameraTrack).catch(() => {});
       }
-    } else if (videoTrack) {
+    } else if (cameraTrack) {
       try {
-        pc.addTrack(videoTrack, stream!);
+        pc.addTrack(cameraTrack, localStreamRef.current!);
       } catch (e) {}
+    }
+
+    // Video Transceiver 1: Screen Share Video
+    if (videoTransceivers[1] && videoTransceivers[1].sender) {
+      videoTransceivers[1].direction = 'sendrecv';
+      if (videoTransceivers[1].sender.track !== (screenTrack || null)) {
+        await videoTransceivers[1].sender.replaceTrack(screenTrack || null).catch(() => {});
+      }
     }
   }, []);
 
@@ -575,30 +594,46 @@ export function useWebGroupCall({
 
       // As initiator, add local tracks and transceivers before creating offer
       if (isInitiator) {
-        const stream =
+        const audioTrack = localStreamRef.current?.getAudioTracks()[0];
+        const cameraTrack = localStreamRef.current?.getVideoTracks()[0];
+        const screenTrack =
           stateRef.current.isScreenSharing && screenStreamRef.current
-            ? screenStreamRef.current
-            : localStreamRef.current;
+            ? screenStreamRef.current.getVideoTracks()[0]
+            : null;
 
-        if (stream) {
-          stream.getTracks().forEach((track) => {
-            try {
-              pc.addTrack(track, stream);
-            } catch (e) {
-              console.warn('[Web Mesh] Error adding track:', e);
-            }
-          });
+        if (audioTrack) {
+          try {
+            pc.addTrack(audioTrack, localStreamRef.current!);
+          } catch (e) {}
+        }
+        if (cameraTrack) {
+          try {
+            pc.addTrack(cameraTrack, localStreamRef.current!);
+          } catch (e) {}
+        }
+        if (screenTrack && screenStreamRef.current) {
+          try {
+            pc.addTrack(screenTrack, screenStreamRef.current);
+          } catch (e) {}
         }
 
         const transceivers = pc.getTransceivers();
         const hasAudio = transceivers.some((t) => t.sender.track?.kind === 'audio');
-        const hasVideo = transceivers.some((t) => t.sender.track?.kind === 'video');
+        const videoTransceivers = transceivers.filter((t) => t.sender.track?.kind === 'video');
+
         if (!hasAudio) {
           try {
             pc.addTransceiver('audio', { direction: 'sendrecv' });
           } catch (e) {}
         }
-        if (!hasVideo) {
+        // Transceiver 0: Camera
+        if (videoTransceivers.length < 1) {
+          try {
+            pc.addTransceiver('video', { direction: 'sendrecv' });
+          } catch (e) {}
+        }
+        // Transceiver 1: Screen Share
+        if (videoTransceivers.length < 2) {
           try {
             pc.addTransceiver('video', { direction: 'sendrecv' });
           } catch (e) {}
@@ -662,6 +697,57 @@ export function useWebGroupCall({
       // Remote stream received: Create a new MediaStream instance to trigger React re-renders
       pc.ontrack = (event) => {
         console.log(`[Web Mesh] ontrack from ${remoteSocketId}: kind=${event.track.kind}`);
+
+        const transceivers = pc.getTransceivers();
+        const videoTransceivers = transceivers.filter(
+          (t) =>
+            t.receiver.track?.kind === 'video' ||
+            t.sender.track?.kind === 'video' ||
+            t.mid === '1' ||
+            t.mid === '2'
+        );
+
+        const isScreenShareTrack =
+          event.track.kind === 'video' &&
+          videoTransceivers.length >= 2 &&
+          (event.transceiver === videoTransceivers[1] || event.transceiver?.mid === '2');
+
+        if (isScreenShareTrack) {
+          console.log(`[Web Mesh] Screen share track received from ${remoteSocketId}`);
+          let screenStream = peerScreenStreamsRef.current.get(remoteSocketId);
+          if (!screenStream) {
+            screenStream = new MediaStream();
+          }
+          if (!screenStream.getTracks().some((t) => t.id === event.track.id)) {
+            screenStream.addTrack(event.track);
+          }
+          const freshScreenStream = new MediaStream(screenStream.getTracks());
+          peerScreenStreamsRef.current.set(remoteSocketId, freshScreenStream);
+
+          event.track.onended = () => {
+            console.log(`[Web Mesh] Remote screen share track ended from ${remoteSocketId}`);
+            setCallState((prev) => ({
+              ...prev,
+              participants: prev.participants.map((p) =>
+                p.id === remoteSocketId || p.socketId === remoteSocketId
+                  ? { ...p, isScreenSharing: false, screenStream: null }
+                  : p
+              ),
+            }));
+          };
+
+          setCallState((prev) => ({
+            ...prev,
+            participants: prev.participants.map((p) =>
+              p.id === remoteSocketId || p.socketId === remoteSocketId
+                ? { ...p, isScreenSharing: true, screenStream: freshScreenStream }
+                : p
+            ),
+          }));
+          return;
+        }
+
+        // Camera / Audio Track
         let stream = peerStreamsRef.current.get(remoteSocketId);
         if (!stream) {
           stream = new MediaStream();
@@ -1080,6 +1166,7 @@ export function useWebGroupCall({
     peersRef.current.forEach((pc) => pc.close());
     peersRef.current.clear();
     peerStreamsRef.current.clear();
+    peerScreenStreamsRef.current.clear();
 
     if (vbProcessorRef.current) {
       vbProcessorRef.current.destroy();
@@ -1333,21 +1420,20 @@ export function useWebGroupCall({
 
       const cameraTrack = localStreamRef.current?.getVideoTracks()[0] || null;
 
-      // Revert video track back to camera on all peers
-      peersRef.current.forEach((pc) => {
+      // Reset screen transceiver on all peers
+      peersRef.current.forEach(async (pc) => {
         const transceivers = pc.getTransceivers();
-        const videoTransceiver = transceivers.find(
+        const videoTransceivers = transceivers.filter(
           (t) =>
-            t.sender.track?.kind === 'video' ||
             t.receiver.track?.kind === 'video' ||
-            t.mid === '1'
+            t.sender.track?.kind === 'video' ||
+            t.mid === '1' ||
+            t.mid === '2'
         );
-        if (videoTransceiver && videoTransceiver.sender) {
-          videoTransceiver.direction = cameraTrack ? 'sendrecv' : 'recvonly';
-          videoTransceiver.sender.replaceTrack(cameraTrack).catch(() => {});
-        } else {
-          const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
-          if (sender) sender.replaceTrack(cameraTrack).catch(() => {});
+        if (videoTransceivers[1] && videoTransceivers[1].sender) {
+          await videoTransceivers[1].sender.replaceTrack(null).catch(() => {});
+        } else if (videoTransceivers[0] && videoTransceivers[0].sender) {
+          await videoTransceivers[0].sender.replaceTrack(cameraTrack).catch(() => {});
         }
       });
 
@@ -1357,6 +1443,7 @@ export function useWebGroupCall({
         localParticipant: {
           ...prev.localParticipant,
           stream: localStreamRef.current,
+          screenStream: null,
           isScreenSharing: false,
         },
       }));
@@ -1399,27 +1486,26 @@ export function useWebGroupCall({
           toggleScreenShare();
         };
 
-        // Replace video track with screen track on all peers
-        peersRef.current.forEach((pc) => {
+        // Attach screen track to dedicated screen transceiver (index 1), keeping camera (index 0) active!
+        peersRef.current.forEach(async (pc) => {
           const transceivers = pc.getTransceivers();
-          const videoTransceiver = transceivers.find(
+          const videoTransceivers = transceivers.filter(
             (t) =>
-              t.sender.track?.kind === 'video' ||
               t.receiver.track?.kind === 'video' ||
-              t.mid === '1'
+              t.sender.track?.kind === 'video' ||
+              t.mid === '1' ||
+              t.mid === '2'
           );
-          if (videoTransceiver && videoTransceiver.sender) {
-            videoTransceiver.direction = 'sendrecv';
-            videoTransceiver.sender.replaceTrack(screenTrack).catch((err) => {
-              console.warn('[ScreenShare] replaceTrack error:', err);
+          if (videoTransceivers[1] && videoTransceivers[1].sender) {
+            videoTransceivers[1].direction = 'sendrecv';
+            await videoTransceivers[1].sender.replaceTrack(screenTrack).catch((err) => {
+              console.warn('[ScreenShare] replaceTrack error on transceiver 1:', err);
             });
-          } else {
-            const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
-            if (sender) {
-              sender.replaceTrack(screenTrack).catch((err) => {
-                console.warn('[ScreenShare] replaceTrack error:', err);
-              });
-            }
+          } else if (videoTransceivers[0] && videoTransceivers[0].sender) {
+            // Fallback for single-transceiver peers
+            await videoTransceivers[0].sender.replaceTrack(screenTrack).catch((err) => {
+              console.warn('[ScreenShare] replaceTrack error on fallback:', err);
+            });
           }
         });
 
@@ -1428,9 +1514,9 @@ export function useWebGroupCall({
           isScreenSharing: true,
           localParticipant: {
             ...prev.localParticipant,
-            stream: screenStream,
+            stream: localStreamRef.current,
+            screenStream,
             isScreenSharing: true,
-            isCameraOff: false,
           },
         }));
 
@@ -1438,7 +1524,7 @@ export function useWebGroupCall({
         const msg = JSON.stringify({
           type: 'screen-share',
           isScreenSharing: true,
-          isCameraOff: false,
+          isCameraOff: stateRef.current.isCameraOff,
           userId: currentUser.id,
         });
         dataChannelsRef.current.forEach((dc) => {
@@ -1450,7 +1536,7 @@ export function useWebGroupCall({
           socket.emit('toggle-screen-share', {
             enabled: true,
             isScreenSharing: true,
-            isCameraOff: false,
+            isCameraOff: stateRef.current.isCameraOff,
             userId: currentUser.id,
           });
         }

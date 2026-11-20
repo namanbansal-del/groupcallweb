@@ -198,8 +198,8 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
   const isAnyScreenSharing = isLocalScreenSharing || isRemoteScreenSharing;
 
   const presentationStream = isLocalScreenSharing
-    ? screenStream || callState.localParticipant.stream
-    : screenshareUser?.stream || null;
+    ? screenStream || callState.localParticipant.screenStream || callState.localParticipant.stream
+    : screenshareUser?.screenStream || screenshareUser?.stream || null;
 
   const presentationPresenterName = isLocalScreenSharing
     ? callState.localParticipant.name
@@ -210,22 +210,13 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
     ? callState.localParticipant
     : screenshareUser || callState.localParticipant;
 
-  const remotePresenterCameraStream = useMemo(() => {
-    if (!screenshareUser?.stream) return null;
-    const vTracks = screenshareUser.stream.getVideoTracks();
-    if (vTracks.length > 1) {
-      return new MediaStream([vTracks[1]]);
-    }
-    return null;
-  }, [screenshareUser?.stream]);
-
-  const presenterCameraStream = isLocalScreenSharing
-    ? localStream
-    : remotePresenterCameraStream;
+  const presenterCameraStream: MediaStream | null = isLocalScreenSharing
+    ? localStream || callState.localParticipant.stream || null
+    : screenshareUser?.stream || null;
 
   const presenterIsCameraOff = isLocalScreenSharing
     ? callState.isCameraOff
-    : (screenshareUser?.isCameraOff ?? true);
+    : (screenshareUser?.isCameraOff ?? false);
 
   const presenterIsMuted = isLocalScreenSharing
     ? callState.isMuted
@@ -344,6 +335,8 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
               isCameraOff={presenterIsCameraOff}
               isMuted={presenterIsMuted}
               isVirtualBgActive={isLocalScreenSharing && virtualBgMode !== 'none'}
+              participants={allUsers}
+              localParticipantId={callState.localParticipant.id}
               onStopPresenting={isLocalScreenSharing ? toggleScreenShare : undefined}
               onRename={isLocalScreenSharing ? handleOpenRename : undefined}
             />
