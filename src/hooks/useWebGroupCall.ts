@@ -954,6 +954,44 @@ export function useWebGroupCall({
     };
   }, [socket, currentUser.id]);
 
+  // ── Handle iOS / Mobile App Switching (Visibility Change) ─────────
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible') {
+        // Re-connect socket if it dropped while in background
+        if (socket && !socket.connected) {
+          socket.connect();
+        }
+
+        // Verify local audio/video tracks are enabled and active
+        const localStream = localStreamRef.current;
+        if (localStream) {
+          const vTracks = localStream.getVideoTracks();
+          if (vTracks.length > 0) {
+            vTracks.forEach((t) => {
+              if (t.readyState === 'live') {
+                t.enabled = !stateRef.current.isCameraOff;
+              }
+            });
+          }
+          const aTracks = localStream.getAudioTracks();
+          if (aTracks.length > 0) {
+            aTracks.forEach((t) => {
+              if (t.readyState === 'live') {
+                t.enabled = !stateRef.current.isMuted;
+              }
+            });
+          }
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [socket]);
+
   // ── Change Display Name ──────────────────────────────────────────
   const changeName = useCallback(
     (newName: string) => {

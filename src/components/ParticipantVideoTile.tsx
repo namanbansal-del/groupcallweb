@@ -19,7 +19,6 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
   const initial = name ? name.slice(0, 1).toUpperCase() : '?';
   const [, setTrackVersion] = useState(0);
   const [hasFrames, setHasFrames] = useState(isLocal);
-  const [isPortrait, setIsPortrait] = useState(false);
 
   // Check if live video tracks actually exist on this stream
   const hasLiveVideoTrack = !!(
@@ -49,9 +48,6 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
     const checkReady = () => {
       if (videoEl && videoEl.videoWidth > 0) {
         setHasFrames(true);
-        if (videoEl.videoHeight > 0) {
-          setIsPortrait(videoEl.videoHeight > videoEl.videoWidth);
-        }
       }
     };
 
@@ -75,6 +71,18 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
     videoEl.addEventListener('canplay', checkReady);
     videoEl.addEventListener('timeupdate', checkReady);
     videoEl.addEventListener('resize', checkReady);
+
+    // Auto-resume on mobile / iOS when user switches back from another app
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && videoEl && showVideo) {
+        if (videoEl.paused) {
+          videoEl.play().then(checkReady).catch(() => {});
+        } else {
+          checkReady();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     const handleUserInteraction = () => {
       if (videoEl && videoEl.paused && showVideo) {
@@ -105,6 +113,7 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
         videoEl.removeEventListener('canplay', checkReady);
         videoEl.removeEventListener('timeupdate', checkReady);
         videoEl.removeEventListener('resize', checkReady);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
         window.removeEventListener('touchstart', handleUserInteraction);
         window.removeEventListener('click', handleUserInteraction);
         vTracks.forEach((t) => {
@@ -120,6 +129,7 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
       videoEl.removeEventListener('canplay', checkReady);
       videoEl.removeEventListener('timeupdate', checkReady);
       videoEl.removeEventListener('resize', checkReady);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('touchstart', handleUserInteraction);
       window.removeEventListener('click', handleUserInteraction);
     };
@@ -139,7 +149,7 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
         muted={true}
         className={`video-elem ${isLocal && !isScreenSharing ? 'video-mirrored' : ''} ${
           isScreenSharing ? 'video-screenshare' : ''
-        } ${isPortrait ? 'video-portrait' : ''}`}
+        }`}
         style={{
           display: showVideo ? 'block' : 'none',
           opacity: isVideoRendering ? 1 : 0,
