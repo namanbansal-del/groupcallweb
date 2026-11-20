@@ -16,9 +16,13 @@ import {
   MessageSquare,
   Smile,
   Pin,
+  MoreVertical,
+  Sparkles,
+  Square,
 } from 'lucide-react';
 import type { Participant } from '../types';
 import { useWebGroupCall } from '../hooks/useWebGroupCall';
+import { useCallRecording } from '../hooks/useCallRecording';
 import { ParticipantVideoTile } from './ParticipantVideoTile';
 import { ParticipantVoiceCard } from './ParticipantVoiceCard';
 import { ParticipantsDrawer } from './ParticipantsDrawer';
@@ -26,6 +30,8 @@ import { PresentationStage } from './PresentationStage';
 import { RemoteAudio } from './RemoteAudio';
 import { ChatPanel } from './ChatPanel';
 import { ReactionPicker, ReactionsOverlay } from './ReactionsOverlay';
+import { VirtualBackgroundModal } from './VirtualBackgroundModal';
+import { MoreOptionsModal } from './MoreOptionsModal';
 
 interface ActiveCallProps {
   call: ReturnType<typeof useWebGroupCall>;
@@ -48,7 +54,18 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
     sendChat,
     sendReaction,
     clearUnread,
+    virtualBgMode,
+    applyVirtualBackground,
   } = call;
+
+  const {
+    recordingType,
+    isRecording,
+    recordingDurationSec,
+    startScreenRecording,
+    startAudioRecording,
+    stopRecording,
+  } = useCallRecording();
 
   const [currentPage, setCurrentPage] = useState(0);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -58,6 +75,8 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isReactOpen, setIsReactOpen] = useState(false);
+  const [isVirtualBgOpen, setIsVirtualBgOpen] = useState(false);
+  const [isMoreOptionsOpen, setIsMoreOptionsOpen] = useState(false);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
 
   // Keyboard shortcuts (Meet-style: Ctrl/Cmd+D mic, Ctrl/Cmd+E camera)
@@ -214,6 +233,20 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
     ? callState.isMuted
     : (screenshareUser?.isMuted ?? false);
 
+  const handleScreenShareClick = () => {
+    if (
+      typeof navigator !== 'undefined' &&
+      navigator.mediaDevices &&
+      typeof navigator.mediaDevices.getDisplayMedia === 'function'
+    ) {
+      toggleScreenShare();
+    } else {
+      alert(
+        'Screen sharing is not supported by your current browser. Please update Google Chrome on Android or use Chrome on Desktop.'
+      );
+    }
+  };
+
   const handleOpenRename = () => {
     setNewNameInput(callState.localParticipant.name);
     setIsEditingName(true);
@@ -256,6 +289,25 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
             {handRaisers.map((h) => h.name).join(', ')}{' '}
             {handRaisers.length === 1 ? 'has raised hand' : 'have raised hands'}
           </span>
+        </div>
+      )}
+
+      {/* Active Recording Status Banner */}
+      {isRecording && (
+        <div className="recording-status-banner">
+          <div className="recording-pulsing-dot" />
+          <span>
+            Recording {recordingType === 'screen' ? 'Screen & Audio' : 'Audio Only'} (
+            {formatDuration(recordingDurationSec)})
+          </span>
+          <button
+            type="button"
+            className="btn-stop-recording-pill"
+            onClick={stopRecording}
+            title="Stop and save recording"
+          >
+            <Square size={12} fill="#FFFFFF" /> Stop Recording
+          </button>
         </div>
       )}
 
@@ -510,23 +562,33 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
             </button>
           )}
 
-          {/* Screen Share (Only rendered if getDisplayMedia is supported on this browser/device) */}
-          {callState.mode === 'video' &&
-            typeof navigator !== 'undefined' &&
-            !!navigator.mediaDevices &&
-            typeof navigator.mediaDevices.getDisplayMedia === 'function' && (
-              <button
-                type="button"
-                className={`dock-btn ${callState.isScreenSharing ? 'dock-btn-active' : ''}`}
-                onClick={toggleScreenShare}
-                title={callState.isScreenSharing ? 'Stop Presenting' : 'Share Screen'}
-              >
-                <MonitorUp size={20} />
-                <span className="dock-btn-label">
-                  {callState.isScreenSharing ? 'Stop Share' : 'Share'}
-                </span>
-              </button>
-            )}
+          {/* Visual Effects / Virtual Background (Desktop) */}
+          {callState.mode === 'video' && !callState.isCameraOff && (
+            <button
+              type="button"
+              className={`dock-btn dock-btn-desktop-only ${virtualBgMode !== 'none' ? 'dock-btn-active' : ''}`}
+              onClick={() => setIsVirtualBgOpen(true)}
+              title="Visual Effects & Virtual Background"
+            >
+              <Sparkles size={20} />
+              <span className="dock-btn-label">Effects</span>
+            </button>
+          )}
+
+          {/* Screen Share (Always available in video mode, works for Android, iOS, Desktop) */}
+          {callState.mode === 'video' && (
+            <button
+              type="button"
+              className={`dock-btn ${callState.isScreenSharing ? 'dock-btn-active' : ''}`}
+              onClick={handleScreenShareClick}
+              title={callState.isScreenSharing ? 'Stop Presenting' : 'Share Screen'}
+            >
+              <MonitorUp size={20} />
+              <span className="dock-btn-label">
+                {callState.isScreenSharing ? 'Stop Share' : 'Share'}
+              </span>
+            </button>
+          )}
 
           {/* Raise Hand */}
           <button
@@ -541,10 +603,10 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
             </span>
           </button>
 
-          {/* Reactions */}
+          {/* Reactions (Desktop Only) */}
           <button
             type="button"
-            className={`dock-btn ${isReactOpen ? 'dock-btn-active' : ''}`}
+            className={`dock-btn dock-btn-desktop-only ${isReactOpen ? 'dock-btn-active' : ''}`}
             onClick={() => setIsReactOpen((v) => !v)}
             title="Send a reaction"
           >
@@ -569,15 +631,27 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
             )}
           </button>
 
-          {/* Open Participants Drawer */}
+          {/* Open Participants Drawer (Desktop Only) */}
           <button
             type="button"
-            className={`dock-btn ${isDrawerOpen ? 'dock-btn-active' : ''}`}
+            className={`dock-btn dock-btn-desktop-only ${isDrawerOpen ? 'dock-btn-active' : ''}`}
             onClick={() => setIsDrawerOpen(!isDrawerOpen)}
             title="View Participants"
           >
             <Users size={20} />
             <span className="dock-btn-label">People ({allUsers.length})</span>
+          </button>
+
+          {/* More Options (Three Dots) - Opens modal on mobile & desktop */}
+          <button
+            type="button"
+            className={`dock-btn ${isMoreOptionsOpen || isRecording ? 'dock-btn-active' : ''}`}
+            onClick={() => setIsMoreOptionsOpen(true)}
+            title="More Options"
+          >
+            <MoreVertical size={20} />
+            <span className="dock-btn-label">More</span>
+            {isRecording && <span className="dock-rec-dot" />}
           </button>
 
           {/* End / Leave Call */}
@@ -777,6 +851,53 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         messages={chat}
         onSend={sendChat}
         selfId={callState.localParticipant.id}
+      />
+
+      {/* Virtual Background & Visual Effects Modal */}
+      <VirtualBackgroundModal
+        isOpen={isVirtualBgOpen}
+        onClose={() => setIsVirtualBgOpen(false)}
+        currentMode={virtualBgMode}
+        onSelectMode={(mode, customUrl) => applyVirtualBackground(mode, customUrl)}
+        localStream={localStream}
+      />
+
+      {/* More Options Modal (Three Dots Menu for Mobile & Desktop) */}
+      <MoreOptionsModal
+        isOpen={isMoreOptionsOpen}
+        onClose={() => setIsMoreOptionsOpen(false)}
+        onOpenVirtualBackground={() => setIsVirtualBgOpen(true)}
+        isRecording={isRecording}
+        recordingType={recordingType}
+        recordingDurationSec={recordingDurationSec}
+        onStartScreenRecord={() =>
+          startScreenRecording({
+            localStream,
+            participants: allUsers,
+            roomId: callState.roomId,
+          })
+        }
+        onStartAudioRecord={() =>
+          startAudioRecording({
+            localStream,
+            participants: allUsers,
+            roomId: callState.roomId,
+          })
+        }
+        onStopRecord={stopRecording}
+        onToggleScreenShare={handleScreenShareClick}
+        isScreenSharing={callState.isScreenSharing}
+        onToggleChat={() => {
+          setIsChatOpen((v) => !v);
+          clearUnread();
+        }}
+        isChatOpen={isChatOpen}
+        unreadChat={unreadChat}
+        onToggleReactions={() => setIsReactOpen((v) => !v)}
+        onToggleParticipants={() => setIsDrawerOpen((v) => !v)}
+        participantCount={allUsers.length}
+        onCopyRoomLink={handleCopyRoomCode}
+        hasCopied={copiedRoom}
       />
     </div>
   );

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CallMode, GroupCallState, Participant } from '../types';
+import { VirtualBackgroundProcessor, BackgroundMode } from '../utils/virtualBackground';
 
 export interface ChatMessage {
   id: string;
@@ -77,6 +78,9 @@ export function useWebGroupCall({
   iceConfigRef.current = iceConfig;
 
   const localStreamRef = useRef<MediaStream | null>(null);
+  const rawCameraTrackRef = useRef<MediaStreamTrack | null>(null);
+  const [virtualBgMode, setVirtualBgMode] = useState<BackgroundMode>('none');
+  const vbProcessorRef = useRef<VirtualBackgroundProcessor | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const peerStreamsRef = useRef<Map<string, MediaStream>>(new Map());
@@ -855,6 +859,7 @@ export function useWebGroupCall({
           initialCameraOff;
 
         localStreamRef.current = stream;
+        rawCameraTrackRef.current = stream ? stream.getVideoTracks()[0] || null : null;
         setLocalStream(stream);
 
         if (stream) {
@@ -1075,6 +1080,12 @@ export function useWebGroupCall({
     peersRef.current.forEach((pc) => pc.close());
     peersRef.current.clear();
     peerStreamsRef.current.clear();
+
+    if (vbProcessorRef.current) {
+      vbProcessorRef.current.destroy();
+      vbProcessorRef.current = null;
+    }
+    setVirtualBgMode('none');
   }, []);
 
   // ── Leave Group Call ─────────────────────────────────────────────
@@ -1122,6 +1133,10 @@ export function useWebGroupCall({
 
     if (nextCameraOff) {
       // Stopping camera: Stop all video tracks completely so camera hardware sensor powers down
+      vbProcessorRef.current?.stop();
+      rawCameraTrackRef.current = null;
+      setVirtualBgMode('none');
+
       if (localStreamRef.current) {
         localStreamRef.current.getVideoTracks().forEach((track) => {
           track.stop();
@@ -1160,6 +1175,7 @@ export function useWebGroupCall({
             localStreamRef.current = new MediaStream();
           }
           localStreamRef.current.addTrack(newTrack);
+          rawCameraTrackRef.current = newTrack;
 
           peersRef.current.forEach((pc) => {
             const transceivers = pc.getTransceivers();
@@ -1222,6 +1238,89 @@ export function useWebGroupCall({
       socket.emit('toggle-video', { enabled: !nextCameraOff });
     }
   }, [currentUser.id, socket]);
+
+  // ── Apply Virtual Background (Blur, Office, Custom) ───────────────
+  const applyVirtualBackground = useCallback(
+    async (mode: BackgroundMode, customImgUrl?: string) => {
+      setVirtualBgMode(mode);
+
+      if (!localStreamRef.current) return;
+
+      if (!vbProcessorRef.current) {
+        vbProcessorRef.current = new VirtualBackgroundProcessor();
+      }
+
+      if (mode === 'none') {
+        vbProcessorRef.current.stop();
+        const rawTrack = rawCameraTrackRef.current;
+        if (rawTrack && rawTrack.readyState === 'live') {
+          const currentVTrack = localStreamRef.current.getVideoTracks()[0];
+          if (currentVTrack && currentVTrack !== rawTrack) {
+            localStreamRef.current.removeTrack(currentVTrack);
+            localStreamRef.current.addTrack(rawTrack);
+          }
+          peersRef.current.forEach((pc) => {
+            const transceivers = pc.getTransceivers();
+            const videoTransceiver = transceivers.find(
+              (t) =>
+                t.sender.track?.kind === 'video' ||
+                t.receiver.track?.kind === 'video' ||
+                t.mid === '1'
+            );
+            if (videoTransceiver && videoTransceiver.sender) {
+              videoTransceiver.sender.replaceTrack(rawTrack).catch(() => {});
+            } else {
+              const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+              if (sender) sender.replaceTrack(rawTrack).catch(() => {});
+            }
+          });
+          setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+        }
+        return;
+      }
+
+      // Ensure raw camera track is stored
+      if (!rawCameraTrackRef.current || rawCameraTrackRef.current.readyState === 'ended') {
+        const vTrack = localStreamRef.current.getVideoTracks()[0];
+        if (vTrack) {
+          rawCameraTrackRef.current = vTrack;
+        }
+      }
+
+      if (!rawCameraTrackRef.current) return;
+
+      const rawStream = new MediaStream([rawCameraTrackRef.current]);
+      const processedTrack = await vbProcessorRef.current.start(rawStream, mode, customImgUrl);
+
+      if (processedTrack) {
+        const currentVTrack = localStreamRef.current.getVideoTracks()[0];
+        if (currentVTrack) {
+          localStreamRef.current.removeTrack(currentVTrack);
+        }
+        localStreamRef.current.addTrack(processedTrack);
+
+        // Replace track on all connected peers
+        peersRef.current.forEach((pc) => {
+          const transceivers = pc.getTransceivers();
+          const videoTransceiver = transceivers.find(
+            (t) =>
+              t.sender.track?.kind === 'video' ||
+              t.receiver.track?.kind === 'video' ||
+              t.mid === '1'
+          );
+          if (videoTransceiver && videoTransceiver.sender) {
+            videoTransceiver.sender.replaceTrack(processedTrack).catch(() => {});
+          } else {
+            const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+            if (sender) sender.replaceTrack(processedTrack).catch(() => {});
+          }
+        });
+
+        setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+      }
+    },
+    []
+  );
 
   // ── Toggle Screen Sharing ────────────────────────────────────────
   const toggleScreenShare = useCallback(async () => {
@@ -1820,5 +1919,7 @@ export function useWebGroupCall({
     sendChat,
     sendReaction,
     clearUnread,
+    virtualBgMode,
+    applyVirtualBackground,
   };
 }
