@@ -161,6 +161,9 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
           <div className={`avatar-circle-lg ${isSpeaking && !isMuted ? 'speaking-ring' : ''}`}>
             <span>{initial}</span>
           </div>
+          <span className="avatar-center-name" title={name}>
+            {name} {isLocal && '(You)'}
+          </span>
         </div>
       )}
 
