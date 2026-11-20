@@ -24,7 +24,6 @@ import type { Participant } from '../types';
 import { useWebGroupCall } from '../hooks/useWebGroupCall';
 import { useCallRecording } from '../hooks/useCallRecording';
 import { ParticipantVideoTile } from './ParticipantVideoTile';
-import { ParticipantVoiceCard } from './ParticipantVoiceCard';
 import { ParticipantsDrawer } from './ParticipantsDrawer';
 import { PresentationStage } from './PresentationStage';
 import { RemoteAudio } from './RemoteAudio';
@@ -126,8 +125,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
       ...callState.localParticipant,
       stream: activeLocalStream,
       isMuted: callState.isMuted,
-      isCameraOff:
-        callState.mode === 'audio' ? true : callState.isScreenSharing ? false : callState.isCameraOff,
+      isCameraOff: callState.isScreenSharing ? false : callState.isCameraOff,
       isHandRaised: callState.isHandRaised,
       isScreenSharing: callState.isScreenSharing,
     };
@@ -348,107 +346,77 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
               onStopPresenting={isLocalScreenSharing ? toggleScreenShare : undefined}
               onRename={isLocalScreenSharing ? handleOpenRename : undefined}
             />
-          ) : callState.mode === 'video' ? (
-            pinnedId && allUsers.some((u) => u.id === pinnedId) ? (
-              <div className="pinned-layout">
-                <div className="pinned-main">
-                  <div
-                    className="video-grid-cell"
-                    onDoubleClick={() => setPinnedId(null)}
-                    style={{ height: '100%', position: 'relative' }}
+          ) : pinnedId && allUsers.some((u) => u.id === pinnedId) ? (
+            <div className="pinned-layout">
+              <div className="pinned-main">
+                <div
+                  className="video-grid-cell"
+                  onDoubleClick={() => setPinnedId(null)}
+                  style={{ height: '100%', position: 'relative' }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setPinnedId(null)}
+                    title="Click or double-click to unpin"
+                    style={{
+                      position: 'absolute',
+                      top: 10,
+                      left: 10,
+                      zIndex: 10,
+                      background: 'rgba(15, 23, 42, 0.75)',
+                      backdropFilter: 'blur(4px)',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      color: '#FFFFFF',
+                      borderRadius: 6,
+                      padding: '3px 8px',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      cursor: 'pointer',
+                    }}
                   >
-                    <button
-                      type="button"
-                      onClick={() => setPinnedId(null)}
-                      title="Click or double-click to unpin"
-                      style={{
-                        position: 'absolute',
-                        top: 10,
-                        left: 10,
-                        zIndex: 10,
-                        background: 'rgba(15, 23, 42, 0.75)',
-                        backdropFilter: 'blur(4px)',
-                        border: '1px solid rgba(255, 255, 255, 0.2)',
-                        color: '#FFFFFF',
-                        borderRadius: 6,
-                        padding: '3px 8px',
-                        fontSize: 11,
-                        fontWeight: 600,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        cursor: 'pointer',
-                      }}
+                    <Pin size={12} />
+                    <span>Unpin</span>
+                  </button>
+                  <ParticipantVideoTile
+                    participant={allUsers.find((u) => u.id === pinnedId)!}
+                    isLocal={pinnedId === callState.localParticipant.id}
+                    onRename={handleOpenRename}
+                  />
+                </div>
+              </div>
+              <div className="pinned-strip">
+                {allUsers
+                  .filter((u) => u.id !== pinnedId)
+                  .map((u) => (
+                    <div
+                      key={u.id}
+                      className="video-grid-cell"
+                      onDoubleClick={() => setPinnedId(u.id)}
                     >
-                      <Pin size={12} />
-                      <span>Unpin</span>
-                    </button>
-                    <ParticipantVideoTile
-                      participant={allUsers.find((u) => u.id === pinnedId)!}
-                      isLocal={pinnedId === callState.localParticipant.id}
-                      onRename={handleOpenRename}
-                    />
-                  </div>
-                </div>
-                <div className="pinned-strip">
-                  {allUsers
-                    .filter((u) => u.id !== pinnedId)
-                    .map((u) => (
-                      <div
-                        key={u.id}
-                        className="video-grid-cell"
-                        onDoubleClick={() => setPinnedId(u.id)}
-                      >
-                        <ParticipantVideoTile
-                          participant={u}
-                          isLocal={u.id === callState.localParticipant.id}
-                          onRename={handleOpenRename}
-                        />
-                      </div>
-                    ))}
-                </div>
-              </div>
-            ) : (
-              <div
-                className={`web-video-grid grid-count-${Math.min(currentUsers.length, 16)}`}
-              >
-                {currentUsers.map((user) => (
-                  <div
-                    key={user.id}
-                    className="video-grid-cell"
-                    onDoubleClick={() => setPinnedId(user.id)}
-                    title="Double-click to pin"
-                  >
-                    <ParticipantVideoTile
-                      participant={user}
-                      isLocal={user.id === callState.localParticipant.id}
-                      onRename={handleOpenRename}
-                    />
-                  </div>
-                ))}
-              </div>
-            )
-          ) : currentUsers.length === 1 && totalPages === 1 ? (
-            /* Single Audio User Hero View */
-            <div className="single-voice-hero">
-              <ParticipantVoiceCard
-                participant={currentUsers[0]}
-                isLocal={currentUsers[0].id === callState.localParticipant.id}
-                size="large"
-                onRename={handleOpenRename}
-              />
-              <div className="single-tip-box">
-                Waiting for others to join... Share room ID: <strong>{callState.roomId}</strong>
+                      <ParticipantVideoTile
+                        participant={u}
+                        isLocal={u.id === callState.localParticipant.id}
+                        onRename={handleOpenRename}
+                      />
+                    </div>
+                  ))}
               </div>
             </div>
           ) : (
-            /* Multi-User Audio Grid View */
             <div
-              className={`web-voice-grid voice-grid-count-${Math.min(currentUsers.length, 16)}`}
+              className={`web-video-grid grid-count-${Math.min(currentUsers.length, 16)}`}
             >
               {currentUsers.map((user) => (
-                <div key={user.id} className="voice-grid-cell">
-                  <ParticipantVoiceCard
+                <div
+                  key={user.id}
+                  className="video-grid-cell"
+                  onDoubleClick={() => setPinnedId(user.id)}
+                  title="Double-click to pin"
+                >
+                  <ParticipantVideoTile
                     participant={user}
                     isLocal={user.id === callState.localParticipant.id}
                     onRename={handleOpenRename}
@@ -547,23 +515,21 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
             </span>
           </button>
 
-          {/* Toggle Video */}
-          {callState.mode === 'video' && (
-            <button
-              type="button"
-              className={`dock-btn ${callState.isCameraOff ? 'dock-btn-danger' : ''}`}
-              onClick={toggleCamera}
-              title={callState.isCameraOff ? 'Start Camera' : 'Stop Camera'}
-            >
-              {callState.isCameraOff ? <VideoOff size={20} /> : <Video size={20} />}
-              <span className="dock-btn-label">
-                {callState.isCameraOff ? 'Start Video' : 'Stop Video'}
-              </span>
-            </button>
-          )}
+          {/* Toggle Video (Always available - users in audio mode can turn on video) */}
+          <button
+            type="button"
+            className={`dock-btn ${callState.isCameraOff ? 'dock-btn-danger' : ''}`}
+            onClick={toggleCamera}
+            title={callState.isCameraOff ? 'Start Camera' : 'Stop Camera'}
+          >
+            {callState.isCameraOff ? <VideoOff size={20} /> : <Video size={20} />}
+            <span className="dock-btn-label">
+              {callState.isCameraOff ? 'Start Video' : 'Stop Video'}
+            </span>
+          </button>
 
           {/* Visual Effects / Virtual Background (Desktop) */}
-          {callState.mode === 'video' && !callState.isCameraOff && (
+          {!callState.isCameraOff && (
             <button
               type="button"
               className={`dock-btn dock-btn-desktop-only ${virtualBgMode !== 'none' ? 'dock-btn-active' : ''}`}
@@ -575,20 +541,18 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
             </button>
           )}
 
-          {/* Screen Share (Always available in video mode, works for Android, iOS, Desktop) */}
-          {callState.mode === 'video' && (
-            <button
-              type="button"
-              className={`dock-btn ${callState.isScreenSharing ? 'dock-btn-active' : ''}`}
-              onClick={handleScreenShareClick}
-              title={callState.isScreenSharing ? 'Stop Presenting' : 'Share Screen'}
-            >
-              <MonitorUp size={20} />
-              <span className="dock-btn-label">
-                {callState.isScreenSharing ? 'Stop Share' : 'Share'}
-              </span>
-            </button>
-          )}
+          {/* Screen Share (Always available, works for Android, iOS, Desktop) */}
+          <button
+            type="button"
+            className={`dock-btn ${callState.isScreenSharing ? 'dock-btn-active' : ''}`}
+            onClick={handleScreenShareClick}
+            title={callState.isScreenSharing ? 'Stop Presenting' : 'Share Screen'}
+          >
+            <MonitorUp size={20} />
+            <span className="dock-btn-label">
+              {callState.isScreenSharing ? 'Stop Share' : 'Share'}
+            </span>
+          </button>
 
           {/* Raise Hand */}
           <button
