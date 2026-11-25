@@ -66,20 +66,31 @@ export const Lobby: React.FC<LobbyProps> = ({
     async function startPreview() {
       try {
         setCameraError(null);
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: 'user',
-            width: { ideal: 1280, min: 640 },
-            height: { ideal: 720, min: 360 },
-            aspectRatio: { ideal: 1.7777777778 },
-          },
-          audio: true,
-        });
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: 'user',
+              width: { ideal: 1280, min: 640 },
+              height: { ideal: 720, min: 360 },
+              aspectRatio: { ideal: 1.7777777778 },
+            },
+            audio: true,
+          });
+        } catch (strictErr) {
+          console.warn('Ideal camera constraints failed, trying basic fallback:', strictErr);
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
+        }
+
         if (active) {
           previewStreamRef.current = stream;
           setPreviewStream(stream);
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
+            videoRef.current.play().catch(() => {});
           }
         } else {
           stream.getTracks().forEach((t) => t.stop());
@@ -87,10 +98,29 @@ export const Lobby: React.FC<LobbyProps> = ({
       } catch (err: any) {
         console.warn('Could not access camera/mic preview:', err);
         if (active) {
+          // Fallback to video-only if audio device is locked or unavailable
+          try {
+            const videoOnlyStream = await navigator.mediaDevices.getUserMedia({ video: true });
+            if (active) {
+              previewStreamRef.current = videoOnlyStream;
+              setPreviewStream(videoOnlyStream);
+              setMicEnabled(false);
+              if (videoRef.current) {
+                videoRef.current.srcObject = videoOnlyStream;
+                videoRef.current.play().catch(() => {});
+              }
+              return;
+            } else {
+              videoOnlyStream.getTracks().forEach((t) => t.stop());
+            }
+          } catch (_) {
+            // Both failed
+          }
+
           setCameraError(
             err.name === 'NotAllowedError'
-              ? 'Camera/microphone access blocked in browser. Please enable permissions.'
-              : 'Could not access camera device.'
+              ? 'Camera/microphone access blocked in browser. Please enable permissions in your address bar.'
+              : 'Could not access camera device. Check permissions or close other apps using the camera.'
           );
         }
       }
@@ -106,6 +136,20 @@ export const Lobby: React.FC<LobbyProps> = ({
       }
     };
   }, [mode]);
+
+  // Ensure videoRef always has the active stream attached and playing
+  useEffect(() => {
+    if (videoRef.current) {
+      if (previewStream && cameraEnabled) {
+        videoRef.current.srcObject = previewStream;
+        videoRef.current.play().catch((err) => {
+          console.warn('Preview video play warning:', err);
+        });
+      } else {
+        videoRef.current.srcObject = null;
+      }
+    }
+  }, [previewStream, cameraEnabled]);
 
   const togglePreviewCam = () => {
     const nextState = !cameraEnabled;
@@ -153,179 +197,185 @@ export const Lobby: React.FC<LobbyProps> = ({
   return (
     <div className="lobby-wrapper">
       <div className="lobby-card">
-        {/* Header */}
-        <div className="lobby-header">
-          <div className="lobby-badge">
-            <Users size={18} color="#2563EB" />
-            <span>GroupCall 50 Web</span>
-          </div>
-          <h1 className="lobby-title">Enterprise WebRTC Group Calling</h1>
-          <p className="lobby-subtitle">
-            HD Video Meetings supporting up to 50 concurrent participants
-          </p>
-        </div>
+        <div className="lobby-grid">
+          {/* Left Column: Big Responsive Camera Preview */}
+          <div className="lobby-preview-col">
+            <div className="preview-container">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="preview-video video-mirrored"
+                style={{ display: cameraEnabled && previewStream ? 'block' : 'none' }}
+              />
+              {(!cameraEnabled || !previewStream) && (
+                <div className="preview-placeholder">
+                  <div className="preview-avatar">
+                    {name ? name.slice(0, 1).toUpperCase() : '?'}
+                  </div>
+                  <span className="preview-status-text">
+                    {cameraError || (!cameraEnabled ? 'Camera is Off' : 'Starting camera preview...')}
+                  </span>
+                </div>
+              )}
 
-        {/* Live Video Preview Box */}
-        <div className="preview-container">
-          {cameraEnabled && previewStream ? (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="preview-video video-mirrored"
-            />
-          ) : (
-            <div className="preview-placeholder">
-              <div className="preview-avatar">
-                {name ? name.slice(0, 1).toUpperCase() : '?'}
-              </div>
-              <span style={{ textAlign: 'center', padding: '0 12px' }}>
-                {cameraError || 'Camera is Off'}
-              </span>
-            </div>
-          )}
-
-          {/* Quick Preview Media Toggles */}
-          <div className="preview-controls">
-            <button
-              type="button"
-              className={`preview-ctrl-btn ${!micEnabled ? 'ctrl-off' : ''}`}
-              onClick={togglePreviewMic}
-              title={micEnabled ? 'Mute Microphone' : 'Unmute Microphone'}
-            >
-              {micEnabled ? <Mic size={18} /> : <MicOff size={18} />}
-            </button>
-            <button
-              type="button"
-              className={`preview-ctrl-btn ${!cameraEnabled ? 'ctrl-off' : ''}`}
-              onClick={togglePreviewCam}
-              title={cameraEnabled ? 'Turn Off Camera' : 'Turn On Camera'}
-            >
-              {cameraEnabled ? <Video size={18} /> : <VideoOff size={18} />}
-            </button>
-          </div>
-        </div>
-
-        {/* Form Inputs */}
-        <form onSubmit={handleSubmit} className="lobby-form">
-          <div className="form-group">
-            <label className="form-label" htmlFor="userNameInput">
-              Your Name
-            </label>
-            <input
-              id="userNameInput"
-              type="text"
-              className="form-input"
-              placeholder="e.g. Alex Johnson"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-              <label className="form-label" htmlFor="roomIdInput" style={{ margin: 0 }}>
-                Meeting Room ID
-              </label>
-              <button
-                type="button"
-                onClick={generateRandomRoom}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--primary)',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  padding: 0,
-                }}
-              >
-                <Dices size={14} />
-                <span>New Clean Room</span>
-              </button>
-            </div>
-            <input
-              id="roomIdInput"
-              type="text"
-              className="form-input"
-              placeholder="e.g. ROOM-5821 or TEST-ROOM"
-              value={roomId}
-              onChange={(e) => setRoomId(e.target.value.toUpperCase())}
-              required
-            />
-            {roomId === 'TEST-ROOM' && (
-              <span style={{ fontSize: '11px', color: '#D97706', marginTop: '4px', display: 'block' }}>
-                Note: TEST-ROOM is a shared public test room with existing participants. Click "New Clean Room" for a private meeting.
-              </span>
-            )}
-          </div>
-
-          {/* Join Call Button */}
-          <button type="submit" className="join-submit-btn">
-            <span>Join Video Meeting</span>
-            <ArrowRight size={18} />
-          </button>
-        </form>
-
-        {/* Server Connection Status Bar */}
-        <div className="server-config-section">
-          <div className="server-status-bar">
-            <span
-              className={`server-status-pill ${
-                isSocketConnected ? 'status-connected' : 'status-disconnected'
-              }`}
-            >
-              <span className="status-dot" />
-              {isSocketConnected ? 'Server Online' : 'Server Disconnected'}
-            </span>
-
-            <button
-              type="button"
-              className="server-config-toggle"
-              onClick={() => setShowServerConfig(!showServerConfig)}
-            >
-              <span>Change Server URL</span>
-            </button>
-          </div>
-
-          {!isSocketConnected && (
-            <div className="server-warning-box">
-              Cannot reach signaling server at <code>{serverUrl}</code>. Multiple users
-              cannot see each other without a connected signaling server.
-            </div>
-          )}
-
-          {showServerConfig && (
-            <div className="server-config-card">
-              <label className="server-config-label">
-                Backend Signaling Server URL:
-              </label>
-              <div className="server-input-row">
-                <input
-                  type="text"
-                  className="server-input"
-                  placeholder="e.g. https://tech.techugo.com:1065"
-                  value={customServerUrl}
-                  onChange={(e) => setCustomServerUrl(e.target.value)}
-                />
+              {/* Quick Preview Media Toggles */}
+              <div className="preview-controls">
                 <button
                   type="button"
-                  className="server-save-btn"
-                  onClick={() => {
-                    onUpdateServerUrl(customServerUrl.trim());
-                    setShowServerConfig(false);
-                  }}
+                  className={`preview-ctrl-btn ${!micEnabled ? 'ctrl-off' : ''}`}
+                  onClick={togglePreviewMic}
+                  title={micEnabled ? 'Mute Microphone' : 'Unmute Microphone'}
                 >
-                  Save & Connect
+                  {micEnabled ? <Mic size={20} /> : <MicOff size={20} />}
+                </button>
+                <button
+                  type="button"
+                  className={`preview-ctrl-btn ${!cameraEnabled ? 'ctrl-off' : ''}`}
+                  onClick={togglePreviewCam}
+                  title={cameraEnabled ? 'Turn Off Camera' : 'Turn On Camera'}
+                >
+                  {cameraEnabled ? <Video size={20} /> : <VideoOff size={20} />}
                 </button>
               </div>
             </div>
-          )}
+          </div>
+
+          {/* Right Column: Header & Join Form */}
+          <div className="lobby-action-col">
+            <div className="lobby-header">
+              <div className="lobby-badge">
+                <Users size={16} color="#2563EB" />
+                <span>GroupCall 50 Web</span>
+              </div>
+              <h1 className="lobby-title">Enterprise WebRTC Group Calling</h1>
+              <p className="lobby-subtitle">
+                HD Video Meetings supporting up to 50 concurrent participants
+              </p>
+            </div>
+
+            {/* Form Inputs */}
+            <form onSubmit={handleSubmit} className="lobby-form">
+              <div className="form-group">
+                <label className="form-label" htmlFor="userNameInput">
+                  Your Name
+                </label>
+                <input
+                  id="userNameInput"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Alex Johnson"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label className="form-label" htmlFor="roomIdInput" style={{ margin: 0 }}>
+                    Meeting Room ID
+                  </label>
+                  <button
+                    type="button"
+                    onClick={generateRandomRoom}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--primary)',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: 0,
+                    }}
+                  >
+                    <Dices size={14} />
+                    <span>New Clean Room</span>
+                  </button>
+                </div>
+                <input
+                  id="roomIdInput"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. ROOM-5821 or TEST-ROOM"
+                  value={roomId}
+                  onChange={(e) => setRoomId(e.target.value.toUpperCase())}
+                  required
+                />
+                {roomId === 'TEST-ROOM' && (
+                  <span style={{ fontSize: '11px', color: '#D97706', marginTop: '4px', display: 'block' }}>
+                    Note: TEST-ROOM is a shared public test room with existing participants. Click "New Clean Room" for a private meeting.
+                  </span>
+                )}
+              </div>
+
+              {/* Join Call Button */}
+              <button type="submit" className="join-submit-btn">
+                <span>Join Video Meeting</span>
+                <ArrowRight size={18} />
+              </button>
+            </form>
+
+            {/* Server Connection Status Bar */}
+            <div className="server-config-section">
+              <div className="server-status-bar">
+                <span
+                  className={`server-status-pill ${
+                    isSocketConnected ? 'status-connected' : 'status-disconnected'
+                  }`}
+                >
+                  <span className="status-dot" />
+                  {isSocketConnected ? 'Server Online' : 'Server Disconnected'}
+                </span>
+
+                <button
+                  type="button"
+                  className="server-config-toggle"
+                  onClick={() => setShowServerConfig(!showServerConfig)}
+                >
+                  <span>Change Server URL</span>
+                </button>
+              </div>
+
+              {!isSocketConnected && (
+                <div className="server-warning-box">
+                  Cannot reach signaling server at <code>{serverUrl}</code>. Multiple users
+                  cannot see each other without a connected signaling server.
+                </div>
+              )}
+
+              {showServerConfig && (
+                <div className="server-config-card">
+                  <label className="server-config-label">
+                    Backend Signaling Server URL:
+                  </label>
+                  <div className="server-input-row">
+                    <input
+                      type="text"
+                      className="server-input"
+                      placeholder="e.g. https://tech.techugo.com:1065"
+                      value={customServerUrl}
+                      onChange={(e) => setCustomServerUrl(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="server-save-btn"
+                      onClick={() => {
+                        onUpdateServerUrl(customServerUrl.trim());
+                        setShowServerConfig(false);
+                      }}
+                    >
+                      Save & Connect
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
