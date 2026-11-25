@@ -19,6 +19,7 @@ import {
   MoreVertical,
   Sparkles,
   Square,
+  Volume2,
 } from 'lucide-react';
 import type { Participant } from '../types';
 import { useWebGroupCall } from '../hooks/useWebGroupCall';
@@ -77,6 +78,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
   const [isVirtualBgOpen, setIsVirtualBgOpen] = useState(false);
   const [isMoreOptionsOpen, setIsMoreOptionsOpen] = useState(false);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
+  const [audioBlocked, setAudioBlocked] = useState(false);
 
   // Keyboard shortcuts (Meet-style: Ctrl/Cmd+D mic, Ctrl/Cmd+E camera)
   useEffect(() => {
@@ -256,8 +258,21 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
   return (
     <div className="active-call-layout">
       {/* Global persistent audio playback for all remote participants */}
-      {/* This ensures audio from participants on ANY page is audible and does NOT mute when video is stopped */}
-      <div className="global-audio-tracks" style={{ display: 'none' }} aria-hidden="true">
+      {/* Kept off-screen with position fixed instead of display:none to prevent iOS Safari from suspending media elements */}
+      <div
+        className="global-audio-tracks"
+        style={{
+          position: 'fixed',
+          top: '-9999px',
+          left: '-9999px',
+          width: '1px',
+          height: '1px',
+          opacity: 0,
+          pointerEvents: 'none',
+          overflow: 'hidden',
+        }}
+        aria-hidden="true"
+      >
         {callState.participants.map((p) => {
           if (!p.stream || p.id === callState.localParticipant.id) return null;
           return (
@@ -265,10 +280,30 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
               key={`remote-audio-${p.id}`}
               stream={p.stream}
               isMuted={p.isMuted}
+              onPlaybackBlocked={(blocked) => {
+                setAudioBlocked(blocked);
+              }}
             />
           );
         })}
       </div>
+
+      {/* Device Audio Interruption / Autoplay Recovery Banner */}
+      {audioBlocked && (
+        <div
+          className="audio-interruption-banner"
+          onClick={() => {
+            setAudioBlocked(false);
+            window.dispatchEvent(new Event('touchstart'));
+            window.dispatchEvent(new Event('click'));
+          }}
+          role="button"
+          tabIndex={0}
+        >
+          <Volume2 size={16} className="audio-banner-icon" />
+          <span>Audio paused by device (e.g. phone call). Tap anywhere to resume audio.</span>
+        </div>
+      )}
 
       {/* Raised Hands Alert Banner */}
       {handRaisers.length > 0 && (

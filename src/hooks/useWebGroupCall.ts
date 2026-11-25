@@ -1045,41 +1045,80 @@ export function useWebGroupCall({
     };
   }, [socket, currentUser.id]);
 
-  // ── Handle iOS / Mobile App Switching (Visibility Change) ─────────
+  // ── Handle iOS / Mobile App Switching & Audio Interruption Recovery ─────────
   useEffect(() => {
-    const handleVisibilityChange = async () => {
-      if (document.visibilityState === 'visible') {
-        // Re-connect socket if it dropped while in background
-        if (socket && !socket.connected) {
-          socket.connect();
+    const handleVisibilityOrFocus = async () => {
+      // Re-connect socket if it dropped while in background
+      if (socket && !socket.connected) {
+        socket.connect();
+      }
+
+      // Resume AudioContext if suspended (e.g. after phone call or alarm on iOS)
+      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume().catch(() => {});
+      }
+
+      // Verify and recover local audio/video tracks
+      const localStream = localStreamRef.current;
+      if (localStream) {
+        const vTracks = localStream.getVideoTracks();
+        if (vTracks.length > 0) {
+          vTracks.forEach((t) => {
+            if (t.readyState === 'live') {
+              t.enabled = !stateRef.current.isCameraOff;
+            }
+          });
         }
 
-        // Verify local audio/video tracks are enabled and active
-        const localStream = localStreamRef.current;
-        if (localStream) {
-          const vTracks = localStream.getVideoTracks();
-          if (vTracks.length > 0) {
-            vTracks.forEach((t) => {
-              if (t.readyState === 'live') {
-                t.enabled = !stateRef.current.isCameraOff;
-              }
-            });
+        const aTracks = localStream.getAudioTracks();
+        const micDead = aTracks.length === 0 || aTracks.some((t) => t.readyState === 'ended');
+        if (micDead && !stateRef.current.isMuted) {
+          console.warn('[AudioRecovery] Local mic track ended during device interruption, re-acquiring...');
+          try {
+            const newStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const newTrack = newStream.getAudioTracks()[0];
+            if (newTrack && localStreamRef.current) {
+              aTracks.forEach((t) => {
+                localStreamRef.current?.removeTrack(t);
+                t.stop();
+              });
+              localStreamRef.current.addTrack(newTrack);
+              peersRef.current.forEach(async (pc) => {
+                const transceivers = pc.getTransceivers();
+                const audioTransceiver = transceivers.find(
+                  (t) => t.receiver.track?.kind === 'audio' || t.sender.track?.kind === 'audio'
+                );
+                if (audioTransceiver?.sender) {
+                  await audioTransceiver.sender.replaceTrack(newTrack).catch(() => {});
+                }
+              });
+            }
+          } catch (micErr) {
+            console.warn('[AudioRecovery] Failed to reacquire mic track:', micErr);
           }
-          const aTracks = localStream.getAudioTracks();
-          if (aTracks.length > 0) {
-            aTracks.forEach((t) => {
-              if (t.readyState === 'live') {
-                t.enabled = !stateRef.current.isMuted;
-              }
-            });
-          }
+        } else {
+          aTracks.forEach((t) => {
+            if (t.readyState === 'live') {
+              t.enabled = !stateRef.current.isMuted;
+            }
+          });
         }
       }
     };
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        handleVisibilityOrFocus();
+      }
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pageshow', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pageshow', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
     };
   }, [socket]);
 
@@ -1199,9 +1238,35 @@ export function useWebGroupCall({
   const toggleMute = useCallback(() => {
     const nextMuted = !stateRef.current.isMuted;
     if (localStreamRef.current) {
-      localStreamRef.current.getAudioTracks().forEach((track) => {
-        track.enabled = !nextMuted;
-      });
+      const aTracks = localStreamRef.current.getAudioTracks();
+      const dead = aTracks.length === 0 || aTracks.every((t) => t.readyState === 'ended');
+      if (!nextMuted && dead) {
+        navigator.mediaDevices?.getUserMedia({ audio: true }).then((newStream) => {
+          const newTrack = newStream.getAudioTracks()[0];
+          if (newTrack && localStreamRef.current) {
+            aTracks.forEach((t) => {
+              localStreamRef.current?.removeTrack(t);
+              t.stop();
+            });
+            localStreamRef.current.addTrack(newTrack);
+            peersRef.current.forEach(async (pc) => {
+              const transceivers = pc.getTransceivers();
+              const audioTransceiver = transceivers.find(
+                (t) => t.receiver.track?.kind === 'audio' || t.sender.track?.kind === 'audio'
+              );
+              if (audioTransceiver?.sender) {
+                await audioTransceiver.sender.replaceTrack(newTrack).catch(() => {});
+              }
+            });
+          }
+        }).catch((err) => {
+          console.warn('[AudioRecovery] Failed to reacquire mic track on unmute:', err);
+        });
+      } else {
+        aTracks.forEach((track) => {
+          track.enabled = !nextMuted;
+        });
+      }
     }
     setCallState((prev) => ({
       ...prev,

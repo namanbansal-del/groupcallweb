@@ -2410,6 +2410,36 @@ html, body, #root, .app-root {
 @media(prefers-reduced-motion:reduce){.reaction-float,.side-panel{animation:none}}
 
 /* ── Active Recording Status Banner ──────────────────────────────────────── */
+.audio-interruption-banner {
+  background: #2563EB;
+  color: #FFFFFF;
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+  z-index: 50;
+  cursor: pointer;
+  animation: audioBannerPulse 2s infinite ease-in-out;
+}
+
+@keyframes audioBannerPulse {
+  0%, 100% { background: #2563EB; }
+  50% { background: #1D4ED8; }
+}
+
+.audio-banner-icon {
+  animation: audioPulseIcon 1s infinite alternate;
+}
+
+@keyframes audioPulseIcon {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.2); }
+}
+
 .recording-status-banner {
   background: rgba(220, 38, 38, 0.95);
   color: #FFFFFF;
