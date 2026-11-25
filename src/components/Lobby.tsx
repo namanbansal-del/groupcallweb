@@ -43,7 +43,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     return generateMeetCode();
   });
   const [name, setName] = useState(defaultName);
-  const [mode, setMode] = useState<CallMode>('video');
+  const mode: CallMode = 'video';
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [cameraEnabled, setCameraEnabled] = useState(true);
   const [micEnabled, setMicEnabled] = useState(true);
@@ -59,17 +59,9 @@ export const Lobby: React.FC<LobbyProps> = ({
     }
   }, [defaultName]);
 
-  // Initialize camera preview only in video mode
+  // Initialize camera preview for video meeting
   useEffect(() => {
     let active = true;
-
-    if (mode === 'audio') {
-      if (previewStreamRef.current) {
-        previewStreamRef.current.getVideoTracks().forEach((t) => t.stop());
-      }
-      setPreviewStream(null);
-      return;
-    }
 
     async function startPreview() {
       try {
@@ -169,73 +161,51 @@ export const Lobby: React.FC<LobbyProps> = ({
           </div>
           <h1 className="lobby-title">Enterprise WebRTC Group Calling</h1>
           <p className="lobby-subtitle">
-            HD Audio & Video Rooms supporting up to 50 concurrent participants
+            HD Video Meetings supporting up to 50 concurrent participants
           </p>
         </div>
 
-        {/* Mode Selector Tabs */}
-        <div className="mode-toggle-group">
-          <button
-            type="button"
-            className={`mode-btn ${mode === 'video' ? 'mode-btn-active' : ''}`}
-            onClick={() => setMode('video')}
-          >
-            <Video size={18} />
-            <span>Video Meeting</span>
-          </button>
-          <button
-            type="button"
-            className={`mode-btn ${mode === 'audio' ? 'mode-btn-active' : ''}`}
-            onClick={() => setMode('audio')}
-          >
-            <Mic size={18} />
-            <span>Voice Room (Audio)</span>
-          </button>
-        </div>
-
         {/* Live Video Preview Box */}
-        {mode === 'video' && (
-          <div className="preview-container">
-            {cameraEnabled && previewStream ? (
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="preview-video video-mirrored"
-              />
-            ) : (
-              <div className="preview-placeholder">
-                <div className="preview-avatar">
-                  {name ? name.slice(0, 1).toUpperCase() : '?'}
-                </div>
-                <span style={{ textAlign: 'center', padding: '0 12px' }}>
-                  {cameraError || 'Camera is Off'}
-                </span>
+        <div className="preview-container">
+          {cameraEnabled && previewStream ? (
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="preview-video video-mirrored"
+            />
+          ) : (
+            <div className="preview-placeholder">
+              <div className="preview-avatar">
+                {name ? name.slice(0, 1).toUpperCase() : '?'}
               </div>
-            )}
-
-            {/* Quick Preview Media Toggles */}
-            <div className="preview-controls">
-              <button
-                type="button"
-                className={`preview-ctrl-btn ${!micEnabled ? 'ctrl-off' : ''}`}
-                onClick={togglePreviewMic}
-                title={micEnabled ? 'Mute Microphone' : 'Unmute Microphone'}
-              >
-                {micEnabled ? <Mic size={18} /> : <MicOff size={18} />}
-              </button>
-              <button
-                type="button"
-                className={`preview-ctrl-btn ${!cameraEnabled ? 'ctrl-off' : ''}`}
-                onClick={togglePreviewCam}
-                title={cameraEnabled ? 'Turn Off Camera' : 'Turn On Camera'}
-              >
-                {cameraEnabled ? <Video size={18} /> : <VideoOff size={18} />}
-              </button>
+              <span style={{ textAlign: 'center', padding: '0 12px' }}>
+                {cameraError || 'Camera is Off'}
+              </span>
             </div>
+          )}
+
+          {/* Quick Preview Media Toggles */}
+          <div className="preview-controls">
+            <button
+              type="button"
+              className={`preview-ctrl-btn ${!micEnabled ? 'ctrl-off' : ''}`}
+              onClick={togglePreviewMic}
+              title={micEnabled ? 'Mute Microphone' : 'Unmute Microphone'}
+            >
+              {micEnabled ? <Mic size={18} /> : <MicOff size={18} />}
+            </button>
+            <button
+              type="button"
+              className={`preview-ctrl-btn ${!cameraEnabled ? 'ctrl-off' : ''}`}
+              onClick={togglePreviewCam}
+              title={cameraEnabled ? 'Turn Off Camera' : 'Turn On Camera'}
+            >
+              {cameraEnabled ? <Video size={18} /> : <VideoOff size={18} />}
+            </button>
           </div>
-        )}
+        </div>
 
         {/* Form Inputs */}
         <form onSubmit={handleSubmit} className="lobby-form">
@@ -297,7 +267,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
           {/* Join Call Button */}
           <button type="submit" className="join-submit-btn">
-            <span>Join {mode === 'video' ? 'Video Meeting' : 'Voice Room'}</span>
+            <span>Join Video Meeting</span>
             <ArrowRight size={18} />
           </button>
         </form>

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Check, Sparkles, Upload, Eye } from 'lucide-react';
 import type { BackgroundMode } from '../utils/virtualBackground';
+import techugoImgUrl from '../assets/techugoImg.jpg';
 
 interface VirtualBackgroundModalProps {
   isOpen: boolean;
@@ -144,7 +145,7 @@ export const VirtualBackgroundModal: React.FC<VirtualBackgroundModalProps> = ({
             >
               <div
                 className="vb-thumb vb-thumb-image"
-                style={{ backgroundImage: `url(/assets/techugoImg.jpg)` }}
+                style={{ backgroundImage: `url(${techugoImgUrl || '/assets/techugoImg.jpg'})` }}
               />
               <span className="vb-card-label">Techugo Office</span>
               {selectedMode === 'image-techugo' && <Check size={16} className="vb-card-check" />}

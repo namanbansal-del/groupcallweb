@@ -1338,7 +1338,9 @@ export function useWebGroupCall({
       }
 
       if (mode === 'none') {
-        vbProcessorRef.current.stop();
+        if (vbProcessorRef.current) {
+          vbProcessorRef.current.stop();
+        }
         const rawTrack = rawCameraTrackRef.current;
         if (rawTrack && rawTrack.readyState === 'live') {
           const currentVTrack = localStreamRef.current.getVideoTracks()[0];
@@ -1361,8 +1363,22 @@ export function useWebGroupCall({
               if (sender) sender.replaceTrack(rawTrack).catch(() => {});
             }
           });
-          setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+          const freshStream = new MediaStream(localStreamRef.current.getTracks());
+          setLocalStream(freshStream);
+          setCallState((prev) => ({
+            ...prev,
+            localParticipant: {
+              ...prev.localParticipant,
+              stream: freshStream,
+            },
+          }));
         }
+        return;
+      }
+
+      // If processor is already running, switch effect instantly on the fly without renegotiating or restarting
+      if (vbProcessorRef.current && vbProcessorRef.current.isStarted()) {
+        await vbProcessorRef.current.setMode(mode, customImgUrl);
         return;
       }
 
@@ -1403,7 +1419,15 @@ export function useWebGroupCall({
           }
         });
 
-        setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+        const freshStream = new MediaStream(localStreamRef.current.getTracks());
+        setLocalStream(freshStream);
+        setCallState((prev) => ({
+          ...prev,
+          localParticipant: {
+            ...prev.localParticipant,
+            stream: freshStream,
+          },
+        }));
       }
     },
     []

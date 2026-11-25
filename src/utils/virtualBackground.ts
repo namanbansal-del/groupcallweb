@@ -1,4 +1,5 @@
 import { SelfieSegmentation, Results } from '@mediapipe/selfie_segmentation';
+import techugoImgUrl from '../assets/techugoImg.jpg';
 
 export type BackgroundMode = 'none' | 'blur-light' | 'blur-heavy' | 'image-techugo' | 'image-custom';
 
@@ -14,6 +15,8 @@ export class VirtualBackgroundProcessor {
   private techugoImage: HTMLImageElement | null = null;
   private outputStream: MediaStream | null = null;
   private isProcessing = false;
+  private isBusy = false;
+  private lastProcessTime = 0;
 
   constructor() {
     this.canvas = document.createElement('canvas');
@@ -21,10 +24,10 @@ export class VirtualBackgroundProcessor {
     this.canvas.height = 720;
     this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
 
-    // Preload default Techugo background
+    // Preload default Techugo background image
     this.techugoImage = new Image();
     this.techugoImage.crossOrigin = 'anonymous';
-    this.techugoImage.src = '/assets/techugoImg.jpg';
+    this.techugoImage.src = techugoImgUrl || '/assets/techugoImg.jpg';
   }
 
   private async initModel(): Promise<void> {
@@ -34,13 +37,13 @@ export class VirtualBackgroundProcessor {
       try {
         const segmenter = new SelfieSegmentation({
           locateFile: (file) => {
-            // First try local public directory, fallback to CDN
             return `/mediapipe/selfie_segmentation/${file}`;
           },
         });
 
+        // modelSelection: 0 is the fast general model (256x256), optimized for real-time video calls with near-zero latency
         segmenter.setOptions({
-          modelSelection: 1, // 1 is landscape / faster
+          modelSelection: 0,
           selfieMode: false,
         });
 
@@ -57,7 +60,7 @@ export class VirtualBackgroundProcessor {
           const fallbackSegmenter = new SelfieSegmentation({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`,
           });
-          fallbackSegmenter.setOptions({ modelSelection: 1, selfieMode: false });
+          fallbackSegmenter.setOptions({ modelSelection: 0, selfieMode: false });
           fallbackSegmenter.onResults((results) => this.renderFrame(results));
           this.segmenter = fallbackSegmenter;
           this.isModelLoaded = true;
@@ -83,6 +86,17 @@ export class VirtualBackgroundProcessor {
       };
       img.src = imageUrl;
     });
+  }
+
+  public isStarted(): boolean {
+    return this.isProcessing && this.outputStream !== null;
+  }
+
+  public async setMode(mode: BackgroundMode, customImageUrl?: string): Promise<void> {
+    this.currentMode = mode;
+    if (customImageUrl) {
+      await this.setCustomImage(customImageUrl);
+    }
   }
 
   public async start(
@@ -119,14 +133,21 @@ export class VirtualBackgroundProcessor {
     this.videoEl.srcObject = cameraStream;
     await this.videoEl.play().catch(() => {});
 
-    // Match canvas dimensions to video
-    const width = this.videoEl.videoWidth || 1280;
-    const height = this.videoEl.videoHeight || 720;
+    // Match canvas dimensions to video (cap to 1280x720 for silky smooth 30fps)
+    let width = this.videoEl.videoWidth || 1280;
+    let height = this.videoEl.videoHeight || 720;
+    if (width > 1280) {
+      height = Math.round((height * 1280) / width);
+      width = 1280;
+    }
     this.canvas.width = width;
     this.canvas.height = height;
 
-    this.isProcessing = true;
-    this.processLoop();
+    // Start single processing loop if not already running
+    if (!this.isProcessing) {
+      this.isProcessing = true;
+      this.processLoop();
+    }
 
     // Capture processed 30fps track
     if (!this.outputStream) {
@@ -137,10 +158,7 @@ export class VirtualBackgroundProcessor {
   }
 
   public changeMode(mode: BackgroundMode, customImageUrl?: string): void {
-    this.currentMode = mode;
-    if (customImageUrl) {
-      this.setCustomImage(customImageUrl);
-    }
+    this.setMode(mode, customImageUrl);
   }
 
   private processLoop = async () => {
@@ -150,11 +168,17 @@ export class VirtualBackgroundProcessor {
       return;
     }
 
-    if (this.videoEl.readyState >= 2 && !this.videoEl.paused) {
+    const now = performance.now();
+    // Cap inference to ~30 FPS (every 32ms) and guard against concurrent in-flight executions
+    if (now - this.lastProcessTime >= 32 && !this.isBusy && this.videoEl.readyState >= 2 && !this.videoEl.paused) {
+      this.isBusy = true;
+      this.lastProcessTime = now;
       try {
         await this.segmenter.send({ image: this.videoEl });
       } catch (e) {
-        // Skip frame if busy
+        // Skip frame if dropped
+      } finally {
+        this.isBusy = false;
       }
     }
 
@@ -187,20 +211,20 @@ export class VirtualBackgroundProcessor {
       ctx.save();
       ctx.translate(width, 0);
       ctx.scale(-1, 1);
-      ctx.filter = 'blur(8px)';
+      ctx.filter = 'blur(6px)';
       ctx.drawImage(results.image, 0, 0, width, height);
       ctx.restore();
     } else if (this.currentMode === 'blur-heavy') {
       ctx.save();
       ctx.translate(width, 0);
       ctx.scale(-1, 1);
-      ctx.filter = 'blur(18px)';
+      ctx.filter = 'blur(12px)';
       ctx.drawImage(results.image, 0, 0, width, height);
       ctx.restore();
-    } else if (this.currentMode === 'image-techugo' && this.techugoImage && this.techugoImage.complete) {
+    } else if (this.currentMode === 'image-techugo' && this.techugoImage) {
       // Draw background image in original, non-reversed orientation (never flipped)
       ctx.drawImage(this.techugoImage, 0, 0, width, height);
-    } else if (this.currentMode === 'image-custom' && this.customImage && this.customImage.complete) {
+    } else if (this.currentMode === 'image-custom' && this.customImage) {
       // Draw custom background image in original, non-reversed orientation (never flipped)
       ctx.drawImage(this.customImage, 0, 0, width, height);
     } else {
@@ -214,6 +238,7 @@ export class VirtualBackgroundProcessor {
 
   public stop(): void {
     this.isProcessing = false;
+    this.isBusy = false;
     if (this.animId) {
       cancelAnimationFrame(this.animId);
       this.animId = null;
@@ -222,6 +247,7 @@ export class VirtualBackgroundProcessor {
       this.videoEl.pause();
       this.videoEl.srcObject = null;
     }
+    this.currentMode = 'none';
   }
 
   public destroy(): void {
