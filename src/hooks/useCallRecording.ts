@@ -44,6 +44,9 @@ export function useCallRecording() {
     ): { ctx: AudioContext; destination: MediaStreamAudioDestinationNode } => {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
       const destination = ctx.createMediaStreamDestination();
 
       // 1. Local user audio
@@ -174,15 +177,16 @@ export function useCallRecording() {
         };
 
         recorder.onstop = () => {
+          const effectiveMime = recorder.mimeType || selectedMime || 'video/webm';
           const blob = new Blob(recordedChunksRef.current, {
-            type: selectedMime || 'video/webm',
+            type: effectiveMime,
           });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.style.display = 'none';
           a.href = url;
           const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          const ext = selectedMime.includes('mp4') ? 'mp4' : 'webm';
+          const ext = effectiveMime.includes('mp4') ? 'mp4' : 'webm';
           a.download = `Meeting-Recording-${roomId || 'Room'}-${dateStr}.${ext}`;
           document.body.appendChild(a);
           a.click();
@@ -240,15 +244,16 @@ export function useCallRecording() {
         };
 
         recorder.onstop = () => {
+          const effectiveMime = recorder.mimeType || selectedMime || 'audio/webm';
           const blob = new Blob(recordedChunksRef.current, {
-            type: selectedMime || 'audio/webm',
+            type: effectiveMime,
           });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.style.display = 'none';
           a.href = url;
           const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          const ext = selectedMime.includes('mp4') ? 'm4a' : 'mp3';
+          const ext = effectiveMime.includes('mp4') ? 'm4a' : effectiveMime.includes('ogg') ? 'ogg' : 'mp3';
           a.download = `Meeting-Audio-${roomId || 'Room'}-${dateStr}.${ext}`;
           document.body.appendChild(a);
           a.click();

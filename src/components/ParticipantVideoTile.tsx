@@ -72,6 +72,10 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
     videoEl.addEventListener('timeupdate', checkReady);
     videoEl.addEventListener('resize', checkReady);
 
+    // Fast interval fallback for mobile devices to catch videoWidth > 0 immediately
+    const checkTimer = window.setInterval(checkReady, 250);
+    const stopCheckTimeout = window.setTimeout(() => window.clearInterval(checkTimer), 4000);
+
     // Auto-resume on mobile / iOS when user switches back from another app
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && videoEl && showVideo) {
@@ -114,6 +118,8 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
       });
 
       return () => {
+        window.clearInterval(checkTimer);
+        window.clearTimeout(stopCheckTimeout);
         videoEl.removeEventListener('loadeddata', checkReady);
         videoEl.removeEventListener('playing', checkReady);
         videoEl.removeEventListener('canplay', checkReady);
@@ -131,6 +137,8 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
     }
 
     return () => {
+      window.clearInterval(checkTimer);
+      window.clearTimeout(stopCheckTimeout);
       videoEl.removeEventListener('loadeddata', checkReady);
       videoEl.removeEventListener('playing', checkReady);
       videoEl.removeEventListener('canplay', checkReady);

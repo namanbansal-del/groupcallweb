@@ -362,12 +362,15 @@ export class VirtualBackgroundProcessor {
 
   public destroy(): void {
     this.stop();
+    if (this.outputStream) {
+      this.outputStream.getTracks().forEach((t) => t.stop());
+      this.outputStream = null;
+    }
     if (this.segmenter) {
       try {
         this.segmenter.close();
       } catch {}
       this.segmenter = null;
     }
-    this.outputStream = null;
   }
 }
