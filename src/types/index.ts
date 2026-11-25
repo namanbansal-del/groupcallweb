@@ -18,6 +18,13 @@ export interface Participant {
   screenStream?: MediaStream | null;
 }
 
+export interface HostSettings {
+  allowScreenShare: boolean;
+  allowChat: boolean;
+  allowUnmute: boolean;
+  allowCamera: boolean;
+}
+
 export interface GroupCallState {
   roomId: string | null;
   mode: CallMode;
@@ -29,6 +36,9 @@ export interface GroupCallState {
   isCameraOff: boolean;
   isHandRaised: boolean;
   isScreenSharing: boolean;
+  isHost: boolean;
+  hostSettings: HostSettings;
+  hostNotification: string | null;
   durationSec: number;
   error: string | null;
 }

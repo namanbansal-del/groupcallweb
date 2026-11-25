@@ -15,7 +15,7 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
   isVirtualBgActive = false,
   onRename,
 }) => {
-  const { name, isMuted, isCameraOff, isSpeaking, isHandRaised, isScreenSharing, stream } =
+  const { name, isMuted, isCameraOff, isSpeaking, isHandRaised, isScreenSharing, isHost, stream } =
     participant;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const initial = name ? name.slice(0, 1).toUpperCase() : '?';
@@ -208,6 +208,7 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
             {name} {isLocal && '(You)'}
           </span>
         )}
+        {isHost && <span className="tag-host">Host</span>}
         {isMuted ? (
           <div className="mic-badge-muted" title="Muted">
             <MicOff size={13} color="#EF4444" />

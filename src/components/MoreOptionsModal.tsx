@@ -11,6 +11,7 @@ import {
   Copy,
   Square,
   Check,
+  Shield,
 } from 'lucide-react';
 import type { RecordingType } from '../hooks/useCallRecording';
 
@@ -34,6 +35,8 @@ interface MoreOptionsModalProps {
   participantCount: number;
   onCopyRoomLink: () => void;
   hasCopied: boolean;
+  isHost?: boolean;
+  onOpenHostControls?: () => void;
 }
 
 export const MoreOptionsModal: React.FC<MoreOptionsModalProps> = ({
@@ -56,6 +59,8 @@ export const MoreOptionsModal: React.FC<MoreOptionsModalProps> = ({
   participantCount,
   onCopyRoomLink,
   hasCopied,
+  isHost = false,
+  onOpenHostControls,
 }) => {
   if (!isOpen) return null;
 
@@ -83,6 +88,26 @@ export const MoreOptionsModal: React.FC<MoreOptionsModalProps> = ({
         </div>
 
         <div className="sheet-items-grid">
+          {/* Host Controls (If Host) */}
+          {isHost && onOpenHostControls && (
+            <button
+              type="button"
+              className="sheet-item-btn item-active"
+              onClick={() => {
+                onClose();
+                onOpenHostControls();
+              }}
+            >
+              <div className="sheet-item-icon bg-blue">
+                <Shield size={20} color="#3B82F6" />
+              </div>
+              <div className="sheet-item-text">
+                <span className="sheet-item-title">Host Controls 👑</span>
+                <span className="sheet-item-desc">Mute all, lock screen share & permissions</span>
+              </div>
+            </button>
+          )}
+
           {/* 1. Visual Effects & Background */}
           <button
             type="button"

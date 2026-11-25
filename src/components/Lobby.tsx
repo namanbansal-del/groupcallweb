@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Video, VideoOff, Mic, MicOff, Users, ArrowRight, Dices } from 'lucide-react';
+import { Video, VideoOff, Mic, MicOff, Users, ArrowRight, Dices, Shield, Key } from 'lucide-react';
 import type { CallMode } from '../types';
 
 interface LobbyProps {
@@ -9,7 +9,8 @@ interface LobbyProps {
     mode: CallMode,
     cameraEnabled?: boolean,
     micEnabled?: boolean,
-    existingStream?: MediaStream | null
+    existingStream?: MediaStream | null,
+    isHost?: boolean
   ) => void;
   defaultName?: string;
   defaultRoomId?: string;
@@ -50,6 +51,8 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [showServerConfig, setShowServerConfig] = useState(false);
   const [customServerUrl, setCustomServerUrl] = useState(serverUrl);
+  const [joinAsHost, setJoinAsHost] = useState(false);
+  const [hostKey, setHostKey] = useState('admin123');
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const previewStreamRef = useRef<MediaStream | null>(null);
 
@@ -184,13 +187,16 @@ export const Lobby: React.FC<LobbyProps> = ({
     previewStreamRef.current = null;
     setPreviewStream(null);
 
+    const isHost = joinAsHost && (hostKey.trim().length > 0);
+
     onJoin(
       roomId.trim().toUpperCase(),
       name.trim(),
       mode,
       cameraEnabled,
       micEnabled,
-      stream
+      stream,
+      isHost
     );
   };
 
@@ -313,9 +319,46 @@ export const Lobby: React.FC<LobbyProps> = ({
                 )}
               </div>
 
+              {/* Host / Admin Login Section */}
+              <div className="host-login-box">
+                <label className="host-toggle-label">
+                  <input
+                    type="checkbox"
+                    checked={joinAsHost}
+                    onChange={(e) => setJoinAsHost(e.target.checked)}
+                    className="host-checkbox"
+                  />
+                  <div className="host-toggle-content">
+                    <div className="host-toggle-title">
+                      <Shield size={16} color="#2563EB" />
+                      <span>Join as Meeting Host / Admin</span>
+                    </div>
+                    <span className="host-toggle-desc">
+                      Full control: mute anyone, lock screen sharing, and manage meeting permissions
+                    </span>
+                  </div>
+                </label>
+
+                {joinAsHost && (
+                  <div className="host-key-wrap">
+                    <div className="host-key-input-row">
+                      <Key size={14} color="#64748B" />
+                      <input
+                        type="password"
+                        className="host-key-input"
+                        placeholder="Admin Host Passcode (default: admin123)"
+                        value={hostKey}
+                        onChange={(e) => setHostKey(e.target.value)}
+                      />
+                    </div>
+                    <span className="host-key-hint">Default passcode: <code>admin123</code></span>
+                  </div>
+                )}
+              </div>
+
               {/* Join Call Button */}
               <button type="submit" className="join-submit-btn">
-                <span>Join Video Meeting</span>
+                <span>{joinAsHost ? 'Join as Meeting Host 👑' : 'Join Video Meeting'}</span>
                 <ArrowRight size={18} />
               </button>
             </form>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CallMode, GroupCallState, Participant } from '../types';
+import type { CallMode, GroupCallState, HostSettings, Participant } from '../types';
 import { VirtualBackgroundProcessor, BackgroundMode } from '../utils/virtualBackground';
 
 export interface ChatMessage {
@@ -57,6 +57,14 @@ export function useWebGroupCall({
     isCameraOff: false,
     isHandRaised: false,
     isScreenSharing: false,
+    isHost: false,
+    hostSettings: {
+      allowScreenShare: true,
+      allowChat: true,
+      allowUnmute: true,
+      allowCamera: true,
+    },
+    hostNotification: null,
     durationSec: 0,
     error: null,
   });
@@ -286,9 +294,18 @@ export function useWebGroupCall({
                 name: stateRef.current.localParticipant.name,
                 isHandRaised: stateRef.current.localParticipant.isHandRaised,
                 isScreenSharing: stateRef.current.localParticipant.isScreenSharing,
+                isHost: stateRef.current.isHost,
                 userId: currentUser.id,
               })
             );
+            if (stateRef.current.isHost) {
+              dc.send(
+                JSON.stringify({
+                  type: 'host-settings',
+                  settings: stateRef.current.hostSettings,
+                })
+              );
+            }
           } catch (e) {
             console.warn('[DataChannel] sendSync error:', e);
           }
@@ -304,6 +321,78 @@ export function useWebGroupCall({
         try {
           const data = JSON.parse(event.data);
           console.log(`[DataChannel] Direct P2P packet from ${peerId}:`, data);
+
+          if (data.type === 'host-mute') {
+            const isMe = data.targetId === currentUser.id || data.targetId === socket?.id;
+            if (isMe && !stateRef.current.isHost) {
+              localStreamRef.current?.getAudioTracks().forEach((t) => {
+                t.enabled = false;
+              });
+              setCallState((p) => ({
+                ...p,
+                isMuted: true,
+                localParticipant: { ...p.localParticipant, isMuted: true },
+                hostNotification: 'You were muted by the meeting host.',
+              }));
+              if (socket?.connected) {
+                socket.emit('toggle-audio', { enabled: false });
+              }
+            }
+            return;
+          }
+
+          if (data.type === 'host-mute-all') {
+            if (!stateRef.current.isHost) {
+              localStreamRef.current?.getAudioTracks().forEach((t) => {
+                t.enabled = false;
+              });
+              setCallState((p) => ({
+                ...p,
+                isMuted: true,
+                localParticipant: { ...p.localParticipant, isMuted: true },
+                hostNotification: 'All participants were muted by the meeting host.',
+              }));
+              if (socket?.connected) {
+                socket.emit('toggle-audio', { enabled: false });
+              }
+            }
+            return;
+          }
+
+          if (data.type === 'host-stop-screenshare') {
+            const isMe = data.targetId === currentUser.id || data.targetId === socket?.id;
+            if (isMe && stateRef.current.isScreenSharing) {
+              toggleScreenShare();
+              setCallState((p) => ({
+                ...p,
+                hostNotification: 'Your screen sharing was stopped by the host.',
+              }));
+            }
+            return;
+          }
+
+          if (data.type === 'host-remove') {
+            const isMe = data.targetId === currentUser.id || data.targetId === socket?.id;
+            if (isMe) {
+              leaveGroupCall();
+              alert('You were removed from the meeting by the host.');
+            }
+            return;
+          }
+
+          if (data.type === 'host-settings') {
+            if (data.settings) {
+              setCallState((p) => ({ ...p, hostSettings: data.settings }));
+              if (!data.settings.allowScreenShare && stateRef.current.isScreenSharing && !stateRef.current.isHost) {
+                toggleScreenShare();
+                setCallState((p) => ({
+                  ...p,
+                  hostNotification: 'Screen sharing has been disabled by the meeting host.',
+                }));
+              }
+            }
+            return;
+          }
 
           if (data.type === 'chat') {
             setChat((p) =>
@@ -347,6 +436,7 @@ export function useWebGroupCall({
                       typeof data.isScreenSharing === 'boolean'
                         ? data.isScreenSharing
                         : p.isScreenSharing,
+                    isHost: typeof data.isHost === 'boolean' ? data.isHost : p.isHost,
                   };
                 }
                 return p;
@@ -842,7 +932,8 @@ export function useWebGroupCall({
       userName?: string,
       cameraEnabled: boolean = true,
       micEnabled: boolean = true,
-      existingStream?: MediaStream | null
+      existingStream?: MediaStream | null,
+      isHost: boolean = false
     ) => {
       const roomCode = roomId.trim().toUpperCase() || 'TEST-ROOM';
       const effectiveName = (userName || currentUser.name || 'Alex Johnson').trim();
@@ -857,12 +948,14 @@ export function useWebGroupCall({
           status: 'joining',
           isCameraOff: initialCameraOff,
           isMuted: initialMuted,
+          isHost,
           error: null,
           localParticipant: {
             ...prev.localParticipant,
             name: effectiveName,
             isCameraOff: initialCameraOff,
             isMuted: initialMuted,
+            isHost,
             socketId: socket?.id || currentUser.id,
             userId: currentUser.id,
           },
@@ -962,12 +1055,14 @@ export function useWebGroupCall({
           status: 'joined',
           isCameraOff: actualCameraOff,
           isMuted: initialMuted,
+          isHost,
           localParticipant: {
             ...prev.localParticipant,
             name: effectiveName,
             stream,
             isMuted: initialMuted,
             isCameraOff: actualCameraOff,
+            isHost,
           },
         }));
 
@@ -982,10 +1077,12 @@ export function useWebGroupCall({
               name: effectiveName,
               displayName: effectiveName,
               userId: currentUser.id,
+              isHost,
               user: {
                 id: currentUser.id,
                 name: effectiveName,
                 userName: effectiveName,
+                isHost,
               },
               isCameraOff: actualCameraOff,
               isMuted: initialMuted,
@@ -1236,6 +1333,14 @@ export function useWebGroupCall({
 
   // ── Toggle Microphone ────────────────────────────────────────────
   const toggleMute = useCallback(() => {
+    if (stateRef.current.isMuted && !stateRef.current.isHost && !stateRef.current.hostSettings.allowUnmute) {
+      setCallState((prev) => ({
+        ...prev,
+        hostNotification: 'The host has disabled unmuting for participants.',
+      }));
+      return;
+    }
+
     const nextMuted = !stateRef.current.isMuted;
     if (localStreamRef.current) {
       const aTracks = localStreamRef.current.getAudioTracks();
@@ -1281,6 +1386,14 @@ export function useWebGroupCall({
 
   // ── Toggle Camera (Complete Hardware Sensor Power Down) ───────────
   const toggleCamera = useCallback(async () => {
+    if (stateRef.current.isCameraOff && !stateRef.current.isHost && !stateRef.current.hostSettings.allowCamera) {
+      setCallState((prev) => ({
+        ...prev,
+        hostNotification: 'The host has disabled video for participants.',
+      }));
+      return;
+    }
+
     const nextCameraOff = !stateRef.current.isCameraOff;
 
     if (nextCameraOff) {
@@ -1500,6 +1613,14 @@ export function useWebGroupCall({
 
   // ── Toggle Screen Sharing ────────────────────────────────────────
   const toggleScreenShare = useCallback(async () => {
+    if (!stateRef.current.isScreenSharing && !stateRef.current.isHost && !stateRef.current.hostSettings.allowScreenShare) {
+      setCallState((prev) => ({
+        ...prev,
+        hostNotification: 'Screen sharing is disabled by the meeting host.',
+      }));
+      return;
+    }
+
     if (stateRef.current.isScreenSharing) {
       if (screenStreamRef.current) {
         screenStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -2053,6 +2174,14 @@ export function useWebGroupCall({
 
   const sendChat = useCallback(
     (text: string) => {
+      if (!stateRef.current.isHost && !stateRef.current.hostSettings.allowChat) {
+        setCallState((prev) => ({
+          ...prev,
+          hostNotification: 'In-call chat is disabled by the meeting host.',
+        }));
+        return;
+      }
+
       const m: ChatMessage = {
         id: `${currentUser.id}-${Date.now()}`,
         userId: currentUser.id,
@@ -2077,6 +2206,88 @@ export function useWebGroupCall({
 
   const clearUnread = useCallback(() => setUnreadChat(0), []);
 
+  // ── Host Admin Controls ───────────────────────────────────────────
+  const hostMuteParticipant = useCallback(
+    (peerId: string) => {
+      broadcast({ type: 'host-mute', targetId: peerId });
+      socket?.emit('host:mute-user', { targetId: peerId, roomId: stateRef.current.roomId });
+      setCallState((prev) => ({
+        ...prev,
+        participants: prev.participants.map((p) =>
+          p.id === peerId || p.socketId === peerId || p.userId === peerId
+            ? { ...p, isMuted: true }
+            : p
+        ),
+      }));
+    },
+    [broadcast, socket]
+  );
+
+  const hostMuteAll = useCallback(() => {
+    broadcast({ type: 'host-mute-all' });
+    socket?.emit('host:mute-all', { roomId: stateRef.current.roomId });
+    setCallState((prev) => ({
+      ...prev,
+      participants: prev.participants.map((p) => ({ ...p, isMuted: true })),
+      hostNotification: 'All participants have been muted.',
+    }));
+  }, [broadcast, socket]);
+
+  const hostStopScreenShare = useCallback(
+    (peerId: string) => {
+      broadcast({ type: 'host-stop-screenshare', targetId: peerId });
+      socket?.emit('host:stop-screenshare', { targetId: peerId, roomId: stateRef.current.roomId });
+      setCallState((prev) => ({
+        ...prev,
+        participants: prev.participants.map((p) =>
+          p.id === peerId || p.socketId === peerId || p.userId === peerId
+            ? { ...p, isScreenSharing: false, screenStream: null }
+            : p
+        ),
+      }));
+    },
+    [broadcast, socket]
+  );
+
+  const hostRemoveParticipant = useCallback(
+    (peerId: string) => {
+      broadcast({ type: 'host-remove', targetId: peerId });
+      socket?.emit('host:remove-user', { targetId: peerId, roomId: stateRef.current.roomId });
+      const pc = peersRef.current.get(peerId);
+      if (pc) {
+        pc.close();
+        peersRef.current.delete(peerId);
+      }
+      setCallState((prev) => ({
+        ...prev,
+        participants: prev.participants.filter(
+          (p) => p.id !== peerId && p.socketId !== peerId && p.userId !== peerId
+        ),
+      }));
+    },
+    [broadcast, socket]
+  );
+
+  const hostUpdateSettings = useCallback(
+    (newSettings: Partial<HostSettings>) => {
+      const updated: HostSettings = {
+        ...stateRef.current.hostSettings,
+        ...newSettings,
+      };
+      setCallState((prev) => ({
+        ...prev,
+        hostSettings: updated,
+      }));
+      broadcast({ type: 'host-settings', settings: updated });
+      socket?.emit('host:settings-update', { settings: updated, roomId: stateRef.current.roomId });
+    },
+    [broadcast, socket]
+  );
+
+  const clearHostNotification = useCallback(() => {
+    setCallState((prev) => ({ ...prev, hostNotification: null }));
+  }, []);
+
   return {
     callState,
     localStream,
@@ -2096,5 +2307,11 @@ export function useWebGroupCall({
     clearUnread,
     virtualBgMode,
     applyVirtualBackground,
+    hostMuteParticipant,
+    hostMuteAll,
+    hostStopScreenShare,
+    hostRemoveParticipant,
+    hostUpdateSettings,
+    clearHostNotification,
   };
 }

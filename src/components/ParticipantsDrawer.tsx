@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { X, Search, Mic, MicOff, Video, VideoOff, Hand, Edit2 } from 'lucide-react';
+import { X, Search, Mic, MicOff, Video, VideoOff, Hand, Edit2, Shield, UserMinus, MonitorOff } from 'lucide-react';
 import type { Participant } from '../types';
 
 interface ParticipantsDrawerProps {
@@ -8,6 +8,12 @@ interface ParticipantsDrawerProps {
   participants: Participant[];
   localParticipant: Participant;
   onOpenRename?: () => void;
+  isHost?: boolean;
+  onMuteParticipant?: (id: string) => void;
+  onStopScreenShare?: (id: string) => void;
+  onRemoveParticipant?: (id: string) => void;
+  onMuteAll?: () => void;
+  onOpenHostControls?: () => void;
 }
 
 export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
@@ -16,6 +22,12 @@ export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
   participants,
   localParticipant,
   onOpenRename,
+  isHost = false,
+  onMuteParticipant,
+  onStopScreenShare,
+  onRemoveParticipant,
+  onMuteAll,
+  onOpenHostControls,
 }) => {
   const [search, setSearch] = useState('');
 
@@ -78,6 +90,30 @@ export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
             </button>
           )}
         </div>
+
+        {/* Host Quick Toolbar */}
+        {isHost && (
+          <div className="drawer-host-toolbar">
+            <button
+              type="button"
+              className="btn-drawer-mute-all"
+              onClick={onMuteAll}
+              title="Mute all participants"
+            >
+              <MicOff size={14} />
+              <span>Mute All</span>
+            </button>
+            <button
+              type="button"
+              className="btn-drawer-host-settings"
+              onClick={onOpenHostControls}
+              title="Open host controls and permissions"
+            >
+              <Shield size={14} />
+              <span>Host Controls</span>
+            </button>
+          </div>
+        )}
 
         {/* Participant List */}
         <div className="drawer-list">
@@ -165,6 +201,46 @@ export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
                       <span className="icon-badge-on" title="Microphone Active">
                         <Mic size={15} color="#10B981" />
                       </span>
+                    )}
+
+                    {/* Host Participant Action Buttons */}
+                    {isHost && !isLocal && (
+                      <div className="host-row-actions">
+                        {!p.isMuted && onMuteParticipant && (
+                          <button
+                            type="button"
+                            className="btn-host-action btn-host-mute"
+                            onClick={() => onMuteParticipant(p.id)}
+                            title={`Mute ${p.name}`}
+                          >
+                            <MicOff size={13} />
+                          </button>
+                        )}
+                        {p.isScreenSharing && onStopScreenShare && (
+                          <button
+                            type="button"
+                            className="btn-host-action btn-host-stop-share"
+                            onClick={() => onStopScreenShare(p.id)}
+                            title={`Stop ${p.name}'s screen sharing`}
+                          >
+                            <MonitorOff size={13} />
+                          </button>
+                        )}
+                        {onRemoveParticipant && (
+                          <button
+                            type="button"
+                            className="btn-host-action btn-host-remove"
+                            onClick={() => {
+                              if (window.confirm(`Remove ${p.name} from the call?`)) {
+                                onRemoveParticipant(p.id);
+                              }
+                            }}
+                            title={`Remove ${p.name} from meeting`}
+                          >
+                            <UserMinus size={13} />
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>

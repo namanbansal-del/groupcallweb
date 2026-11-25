@@ -84,7 +84,8 @@ export function App() {
     mode: CallMode,
     cameraEnabled: boolean = true,
     micEnabled: boolean = true,
-    existingStream?: MediaStream | null
+    existingStream?: MediaStream | null,
+    isHost?: boolean
   ) => {
     const finalName = name.trim() || currentUser.name;
     setCurrentUser((prev) => ({ ...prev, name: finalName }));
@@ -97,7 +98,8 @@ export function App() {
       finalName,
       cameraEnabled,
       micEnabled,
-      existingStream
+      existingStream,
+      isHost
     );
   };
 

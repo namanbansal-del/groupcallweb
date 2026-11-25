@@ -20,6 +20,7 @@ import {
   Sparkles,
   Square,
   Volume2,
+  Shield,
 } from 'lucide-react';
 import type { Participant } from '../types';
 import { useWebGroupCall } from '../hooks/useWebGroupCall';
@@ -32,6 +33,7 @@ import { ChatPanel } from './ChatPanel';
 import { ReactionPicker, ReactionsOverlay } from './ReactionsOverlay';
 import { VirtualBackgroundModal } from './VirtualBackgroundModal';
 import { MoreOptionsModal } from './MoreOptionsModal';
+import { HostControlsModal } from './HostControlsModal';
 
 interface ActiveCallProps {
   call: ReturnType<typeof useWebGroupCall>;
@@ -56,6 +58,12 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
     clearUnread,
     virtualBgMode,
     applyVirtualBackground,
+    hostMuteParticipant,
+    hostMuteAll,
+    hostStopScreenShare,
+    hostRemoveParticipant,
+    hostUpdateSettings,
+    clearHostNotification,
   } = call;
 
   const {
@@ -77,6 +85,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
   const [isReactOpen, setIsReactOpen] = useState(false);
   const [isVirtualBgOpen, setIsVirtualBgOpen] = useState(false);
   const [isMoreOptionsOpen, setIsMoreOptionsOpen] = useState(false);
+  const [isHostControlsOpen, setIsHostControlsOpen] = useState(false);
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
 
@@ -287,6 +296,22 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
           );
         })}
       </div>
+
+      {/* Host Meeting Notification Banner */}
+      {callState.hostNotification && (
+        <div className="host-notification-banner">
+          <Shield size={16} className="host-banner-icon" />
+          <span>{callState.hostNotification}</span>
+          <button
+            type="button"
+            className="btn-close-notify"
+            onClick={clearHostNotification}
+            aria-label="Dismiss notification"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Device Audio Interruption / Autoplay Recovery Banner */}
       {audioBlocked && (
@@ -638,6 +663,19 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
             <span className="dock-btn-label">People ({allUsers.length})</span>
           </button>
 
+          {/* Host Controls (Google Meet Host Shield) */}
+          {callState.isHost && (
+            <button
+              type="button"
+              className={`dock-btn ${isHostControlsOpen ? 'dock-btn-active' : ''}`}
+              onClick={() => setIsHostControlsOpen(true)}
+              title="Host Controls & Permissions"
+            >
+              <Shield size={20} color="#3B82F6" />
+              <span className="dock-btn-label">Host</span>
+            </button>
+          )}
+
           {/* More Options (Three Dots) - Opens modal on mobile & desktop */}
           <button
             type="button"
@@ -773,6 +811,12 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         participants={callState.participants}
         localParticipant={callState.localParticipant}
         onOpenRename={handleOpenRename}
+        isHost={callState.isHost}
+        onMuteParticipant={hostMuteParticipant}
+        onStopScreenShare={hostStopScreenShare}
+        onRemoveParticipant={hostRemoveParticipant}
+        onMuteAll={hostMuteAll}
+        onOpenHostControls={() => setIsHostControlsOpen(true)}
       />
 
       {/* Change Name Modal Dialog */}
@@ -847,6 +891,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         messages={chat}
         onSend={sendChat}
         selfId={callState.localParticipant.id}
+        isChatDisabled={!callState.isHost && !callState.hostSettings.allowChat}
       />
 
       {/* Virtual Background & Visual Effects Modal */}
@@ -856,6 +901,16 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         currentMode={virtualBgMode}
         onSelectMode={(mode, customUrl) => applyVirtualBackground(mode, customUrl)}
         localStream={localStream}
+      />
+
+      {/* Host Controls Modal (Google Meet Host Controls) */}
+      <HostControlsModal
+        isOpen={isHostControlsOpen}
+        onClose={() => setIsHostControlsOpen(false)}
+        hostSettings={callState.hostSettings}
+        onUpdateSettings={hostUpdateSettings}
+        onMuteAll={hostMuteAll}
+        participantCount={allUsers.length}
       />
 
       {/* More Options Modal (Three Dots Menu for Mobile & Desktop) */}
@@ -894,6 +949,8 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         participantCount={allUsers.length}
         onCopyRoomLink={handleCopyRoomCode}
         hasCopied={copiedRoom}
+        isHost={callState.isHost}
+        onOpenHostControls={() => setIsHostControlsOpen(true)}
       />
     </div>
   );

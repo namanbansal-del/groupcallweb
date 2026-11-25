@@ -2874,7 +2874,8 @@ html, body, #root, .app-root {
     padding: 0;
   }
 
-  .virtual-bg-modal {
+  .virtual-bg-modal,
+  .host-controls-modal {
     max-width: 100%;
     border-radius: 20px 20px 0 0;
     max-height: 85vh;
@@ -2898,4 +2899,455 @@ html, body, #root, .app-root {
     from { transform: translateY(100%); }
     to { transform: translateY(0); }
   }
+}
+
+/* ── Lobby Host / Admin Login Card ────────────────────────────────────── */
+.host-login-box {
+  background: var(--bg-card-secondary, #F8FAFC);
+  border: 1px solid var(--border-card, #E2E8F0);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.host-toggle-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.host-checkbox {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  cursor: pointer;
+  accent-color: #2563EB;
+}
+
+.host-toggle-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.host-toggle-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary, #0F172A);
+}
+
+.host-toggle-desc {
+  font-size: 11.5px;
+  color: var(--text-secondary, #64748B);
+  line-height: 1.35;
+}
+
+.host-key-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 28px;
+  animation: fadeInDown 0.15s ease;
+}
+
+.host-key-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-card, #FFFFFF);
+  border: 1.5px solid var(--border-card, #E2E8F0);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.host-key-input {
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 13px;
+  width: 100%;
+  font-family: inherit;
+  color: var(--text-primary, #0F172A);
+}
+
+.host-key-hint {
+  font-size: 11px;
+  color: var(--text-secondary, #64748B);
+}
+
+.host-key-hint code {
+  background: rgba(0, 0, 0, 0.05);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+/* ── Host Meeting Notification Banner ─────────────────────────────────── */
+.host-notification-banner {
+  background: #1E293B;
+  color: #F8FAFC;
+  border-bottom: 2px solid #2563EB;
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  z-index: 60;
+  animation: fadeInDown 0.25s ease;
+}
+
+.host-banner-icon {
+  color: #3B82F6;
+  flex-shrink: 0;
+}
+
+.btn-close-notify {
+  background: transparent;
+  border: none;
+  color: #94A3B8;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  margin-left: 8px;
+  border-radius: 4px;
+}
+
+.btn-close-notify:hover {
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Host Controls Modal ──────────────────────────────────────────────── */
+.host-controls-modal {
+  background: #1E293B;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  width: 100%;
+  max-width: 480px;
+  padding: 24px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  animation: modalScaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.host-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.host-header-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.host-shield-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(37, 99, 235, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.host-modal-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: #F8FAFC;
+  margin: 0 0 2px;
+}
+
+.host-modal-desc {
+  font-size: 12.5px;
+  color: #94A3B8;
+  margin: 0;
+  line-height: 1.35;
+}
+
+.host-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.host-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94A3B8;
+  margin: 0;
+}
+
+.host-mute-all-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.host-mute-all-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mute-icon-circle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.mute-all-heading {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #F8FAFC;
+  display: block;
+}
+
+.mute-all-sub {
+  font-size: 11.5px;
+  color: #94A3B8;
+  display: block;
+}
+
+.btn-host-mute-all {
+  background: #EF4444;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+
+.btn-host-mute-all:hover {
+  background: #DC2626;
+}
+
+.host-toggles-list {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.host-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.host-toggle-row:last-child {
+  border-bottom: none;
+}
+
+.host-toggle-item-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.toggle-icon-wrap {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.toggle-item-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #F8FAFC;
+  display: block;
+}
+
+.toggle-item-desc {
+  font-size: 11.5px;
+  color: #94A3B8;
+  display: block;
+}
+
+/* ── iOS / Meet Style Switch Toggle ─────────────────────────────────────── */
+.switch-toggle {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.switch-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #475569;
+  transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 24px;
+}
+
+.switch-slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.switch-toggle input:checked + .switch-slider {
+  background-color: #2563EB;
+}
+
+.switch-toggle input:checked + .switch-slider:before {
+  transform: translateX(20px);
+}
+
+/* ── Participants Drawer Host Controls ────────────────────────────────── */
+.drawer-host-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-card);
+  background: var(--bg-card-secondary, #F8FAFC);
+}
+
+.btn-drawer-mute-all {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: #EF4444;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-drawer-mute-all:hover {
+  background: #DC2626;
+}
+
+.btn-drawer-host-settings {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: #2563EB;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-drawer-host-settings:hover {
+  background: #1D4ED8;
+}
+
+.host-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+}
+
+.btn-host-action {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-host-mute {
+  background: rgba(239, 68, 68, 0.12);
+  color: #EF4444;
+}
+
+.btn-host-mute:hover {
+  background: #EF4444;
+  color: #FFFFFF;
+}
+
+.btn-host-stop-share {
+  background: rgba(234, 179, 8, 0.12);
+  color: #CA8A04;
+}
+
+.btn-host-stop-share:hover {
+  background: #CA8A04;
+  color: #FFFFFF;
+}
+
+.btn-host-remove {
+  background: rgba(100, 116, 139, 0.12);
+  color: #64748B;
+}
+
+.btn-host-remove:hover {
+  background: #EF4444;
+  color: #FFFFFF;
 }

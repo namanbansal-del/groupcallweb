@@ -8,9 +8,17 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   onSend: (text: string) => void;
   selfId: string;
+  isChatDisabled?: boolean;
 }
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose, messages, onSend, selfId }) => {
+export const ChatPanel: React.FC<ChatPanelProps> = ({
+  isOpen,
+  onClose,
+  messages,
+  onSend,
+  selfId,
+  isChatDisabled = false,
+}) => {
   const [text, setText] = useState('');
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -22,6 +30,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose, messages,
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isChatDisabled) return;
     const t = text.trim();
     if (!t) return;
     onSend(t);
@@ -55,10 +64,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose, messages,
           className="form-input"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Send a message"
+          placeholder={isChatDisabled ? "Chat is disabled by the meeting host" : "Send a message"}
           maxLength={500}
+          disabled={isChatDisabled}
         />
-        <button type="submit" className="chat-send" aria-label="Send" disabled={!text.trim()}>
+        <button type="submit" className="chat-send" aria-label="Send" disabled={isChatDisabled || !text.trim()}>
           <Send size={16} />
         </button>
       </form>
