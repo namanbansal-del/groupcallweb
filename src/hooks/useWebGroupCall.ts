@@ -805,18 +805,17 @@ export function useWebGroupCall({
 
           const existingVideoTracks = stream.getVideoTracks().filter((t) => t.readyState === 'live');
 
-          // A track is a screen share track ONLY IF:
-          // - It is explicitly labeled/hinted as a display/screen capture track, OR
-          // - The peer ALREADY has an active camera video track, AND a second different video track arrives
-          const isExplicitScreenTrack =
-            event.track.contentHint === 'detail' ||
-            (event.track.label && /screen|window|display/i.test(event.track.label));
+          const isPeerSignaledScreenSharing = !!stateRef.current.participants.find(
+            (p) => p.id === remoteSocketId || p.socketId === remoteSocketId
+          )?.isScreenSharing;
 
-          const isSecondVideoTrack =
+          // A track is a screen share track ONLY IF:
+          // 1. The remote peer has explicitly signaled that they are sharing their screen (via socket/datachannel), AND
+          // 2. The peer already has an active camera track and this is a distinct 2nd video track
+          const isScreenShareTrack =
+            isPeerSignaledScreenSharing &&
             existingVideoTracks.length > 0 &&
             !existingVideoTracks.some((t) => t.id === event.track.id);
-
-          const isScreenShareTrack = isExplicitScreenTrack || isSecondVideoTrack;
 
           if (isScreenShareTrack) {
             console.log(`[Web Mesh] Valid remote screen share track from ${remoteSocketId}`);
