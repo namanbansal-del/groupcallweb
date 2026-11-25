@@ -5,14 +5,12 @@ import type { Participant } from '../types';
 interface ParticipantVideoTileProps {
   participant: Participant;
   isLocal?: boolean;
-  isVirtualBgActive?: boolean;
   onRename?: () => void;
 }
 
 export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
   participant,
   isLocal = false,
-  isVirtualBgActive = false,
   onRename,
 }) => {
   const { name, isMuted, isCameraOff, isSpeaking, isHandRaised, isScreenSharing, isHost, stream } =
@@ -140,7 +138,7 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
   // Video feed is actively visible only when frames are rendering
   const isVideoRendering = showVideo && (isLocal || hasFrames);
 
-  const shouldMirror = isLocal && !isScreenSharing && !isVirtualBgActive;
+  const shouldMirror = isLocal && !isScreenSharing;
 
   return (
     <div

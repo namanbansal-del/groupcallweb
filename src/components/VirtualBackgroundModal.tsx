@@ -30,8 +30,14 @@ export const VirtualBackgroundModal: React.FC<VirtualBackgroundModalProps> = ({
   // Hook up preview video
   useEffect(() => {
     if (isOpen && previewVideoRef.current && localStream) {
-      previewVideoRef.current.srcObject = localStream;
-      previewVideoRef.current.play().catch(() => {});
+      const el = previewVideoRef.current;
+      if (el.srcObject !== localStream) {
+        el.srcObject = localStream;
+      }
+      el.onloadedmetadata = () => {
+        el.play().catch(() => {});
+      };
+      el.play().catch(() => {});
     }
   }, [isOpen, localStream]);
 
@@ -85,7 +91,7 @@ export const VirtualBackgroundModal: React.FC<VirtualBackgroundModalProps> = ({
             autoPlay
             playsInline
             muted
-            className={`vb-preview-video ${currentMode === 'none' ? 'video-mirrored' : ''}`}
+            className="vb-preview-video video-mirrored"
           />
           <div className="vb-preview-badge">
             <Eye size={13} />

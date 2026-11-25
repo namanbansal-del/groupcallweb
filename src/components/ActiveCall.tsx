@@ -394,7 +394,6 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
               cameraParticipant={presenterParticipant}
               isCameraOff={presenterIsCameraOff}
               isMuted={presenterIsMuted}
-              isVirtualBgActive={isLocalScreenSharing && virtualBgMode !== 'none'}
               participants={allUsers}
               localParticipantId={callState.localParticipant.id}
               onStopPresenting={isLocalScreenSharing ? toggleScreenShare : undefined}
@@ -437,7 +436,6 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
                   <ParticipantVideoTile
                     participant={allUsers.find((u) => u.id === pinnedId)!}
                     isLocal={pinnedId === callState.localParticipant.id}
-                    isVirtualBgActive={pinnedId === callState.localParticipant.id && virtualBgMode !== 'none'}
                     onRename={handleOpenRename}
                   />
                 </div>
@@ -454,7 +452,6 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
                       <ParticipantVideoTile
                         participant={u}
                         isLocal={u.id === callState.localParticipant.id}
-                        isVirtualBgActive={u.id === callState.localParticipant.id && virtualBgMode !== 'none'}
                         onRename={handleOpenRename}
                       />
                     </div>
@@ -475,7 +472,6 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
                   <ParticipantVideoTile
                     participant={user}
                     isLocal={user.id === callState.localParticipant.id}
-                    isVirtualBgActive={user.id === callState.localParticipant.id && virtualBgMode !== 'none'}
                     onRename={handleOpenRename}
                   />
                 </div>
@@ -900,7 +896,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         onClose={() => setIsVirtualBgOpen(false)}
         currentMode={virtualBgMode}
         onSelectMode={(mode, customUrl) => applyVirtualBackground(mode, customUrl)}
-        localStream={localStream}
+        localStream={callState.localParticipant.stream || localStream}
       />
 
       {/* Host Controls Modal (Google Meet Host Controls) */}
