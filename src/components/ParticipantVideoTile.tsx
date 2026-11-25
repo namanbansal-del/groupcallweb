@@ -92,19 +92,25 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
     window.addEventListener('touchstart', handleUserInteraction, { once: true });
     window.addEventListener('click', handleUserInteraction, { once: true });
 
-    // Listen to video tracks unmuting or ending
+    // Listen to video tracks muting, unmuting or ending
     if (stream) {
       const vTracks = stream.getVideoTracks();
-      const onTrackChange = () => {
+      const onTrackUnmute = () => {
         setTrackVersion((v) => v + 1);
         if (videoEl && showVideo) {
           videoEl.play().then(checkReady).catch(() => {});
         }
       };
+      const onTrackMute = () => {
+        if (!isLocal) {
+          setHasFrames(false);
+        }
+      };
 
       vTracks.forEach((t) => {
-        t.addEventListener('unmute', onTrackChange);
-        t.addEventListener('ended', onTrackChange);
+        t.addEventListener('unmute', onTrackUnmute);
+        t.addEventListener('mute', onTrackMute);
+        t.addEventListener('ended', onTrackMute);
       });
 
       return () => {
@@ -117,8 +123,9 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
         window.removeEventListener('touchstart', handleUserInteraction);
         window.removeEventListener('click', handleUserInteraction);
         vTracks.forEach((t) => {
-          t.removeEventListener('unmute', onTrackChange);
-          t.removeEventListener('ended', onTrackChange);
+          t.removeEventListener('unmute', onTrackUnmute);
+          t.removeEventListener('mute', onTrackMute);
+          t.removeEventListener('ended', onTrackMute);
         });
       };
     }
