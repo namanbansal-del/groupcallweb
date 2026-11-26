@@ -63,8 +63,10 @@ export function useWebGroupCall({
       allowChat: true,
       allowUnmute: true,
       allowCamera: true,
+      requireApprovalToJoin: true,
     },
     hostNotification: null,
+    knockRequests: [],
     durationSec: 0,
     error: null,
   });
@@ -1179,7 +1181,15 @@ export function useWebGroupCall({
             },
             (ack: any) => {
               if (ack) {
-                console.log(`[Web] Joined '${ack.roomCode}'. Total: ${ack.totalUsers}`);
+                if (ack.status === 'waiting_approval') {
+                  setCallState((prev) => ({
+                    ...prev,
+                    status: 'waiting_approval',
+                    roomId: ack.roomCode || roomCode,
+                  }));
+                } else {
+                  console.log(`[Web] Joined '${ack.roomCode}'. Total: ${ack.totalUsers}`);
+                }
               }
             }
           );
@@ -2307,6 +2317,73 @@ export function useWebGroupCall({
       }));
     };
 
+    // 11. Waiting Room Approval Events
+    const onWaitingApproval = ({ roomCode }: { roomCode: string }) => {
+      console.log(`[Waiting Room] Waiting for host approval in room ${roomCode}`);
+      setCallState((prev) => ({
+        ...prev,
+        status: 'waiting_approval',
+        roomId: roomCode || prev.roomId,
+      }));
+    };
+
+    const onAdmitted = ({ roomCode }: { roomCode: string }) => {
+      console.log(`[Waiting Room] Host admitted user into room ${roomCode}`);
+      const targetRoom = roomCode || stateRef.current.roomId;
+      setCallState((prev) => ({
+        ...prev,
+        status: 'joined',
+        roomId: targetRoom,
+      }));
+      // Emit join-room with isAdmitted: true to complete room entry
+      socket.emit(
+        'join-room',
+        {
+          roomCode: targetRoom,
+          roomId: targetRoom,
+          userName: stateRef.current.localParticipant.name,
+          name: stateRef.current.localParticipant.name,
+          displayName: stateRef.current.localParticipant.name,
+          userId: currentUser.id,
+          isAdmitted: true,
+          isHost: false,
+          user: {
+            id: currentUser.id,
+            name: stateRef.current.localParticipant.name,
+            userName: stateRef.current.localParticipant.name,
+            isHost: false,
+          },
+          isCameraOff: stateRef.current.isCameraOff,
+          isMuted: stateRef.current.isMuted,
+        },
+        (ack: any) => {
+          if (ack) {
+            console.log(`[Web] Admitted into '${ack.roomCode}'. Total: ${ack.totalUsers}`);
+          }
+        }
+      );
+    };
+
+    const onDenied = ({ roomCode }: { roomCode: string }) => {
+      console.log(`[Waiting Room] Host denied entry into room ${roomCode}`);
+      setCallState((prev) => ({
+        ...prev,
+        status: 'denied',
+        roomId: roomCode || prev.roomId,
+      }));
+    };
+
+    const onKnockRequest = (req: { socketId: string; userId: string; userName: string }) => {
+      console.log(`[Waiting Room] Knock request from ${req.userName} (${req.socketId})`);
+      setCallState((prev) => ({
+        ...prev,
+        knockRequests: [
+          ...prev.knockRequests.filter((k) => k.socketId !== req.socketId),
+          req,
+        ],
+      }));
+    };
+
     // Register clean, non-duplicate standard socket events
     socket.on('all-users', onAllUsers);
     socket.on('user-connected', onUserConnected);
@@ -2323,6 +2400,11 @@ export function useWebGroupCall({
     socket.on('peer:toggle-screen-share', onPeerToggleScreenShare);
     socket.on('hand-raise', onPeerHandRaise);
     socket.on('change-name', onPeerNameChange);
+    // Waiting room events
+    socket.on('room:waiting-approval', onWaitingApproval);
+    socket.on('room:admitted', onAdmitted);
+    socket.on('room:denied', onDenied);
+    socket.on('room:knock-request', onKnockRequest);
     // Host control events from signaling server
     socket.on('host:mute-user', onHostMuteUser);
     socket.on('host:mute-all', onHostMuteAll);
@@ -2347,6 +2429,10 @@ export function useWebGroupCall({
       socket.off('peer:toggle-screen-share', onPeerToggleScreenShare);
       socket.off('hand-raise', onPeerHandRaise);
       socket.off('change-name', onPeerNameChange);
+      socket.off('room:waiting-approval', onWaitingApproval);
+      socket.off('room:admitted', onAdmitted);
+      socket.off('room:denied', onDenied);
+      socket.off('room:knock-request', onKnockRequest);
       socket.off('host:mute-user', onHostMuteUser);
       socket.off('host:mute-all', onHostMuteAll);
       socket.off('host:stop-screenshare', onHostStopScreenShare);
@@ -2501,6 +2587,36 @@ export function useWebGroupCall({
     setCallState((prev) => ({ ...prev, hostNotification: null }));
   }, []);
 
+  const admitParticipant = useCallback(
+    (targetSocketId: string) => {
+      if (!socket) return;
+      socket.emit('host:admit-entry', {
+        targetId: targetSocketId,
+        roomId: stateRef.current.roomId,
+      });
+      setCallState((prev) => ({
+        ...prev,
+        knockRequests: prev.knockRequests.filter((k) => k.socketId !== targetSocketId),
+      }));
+    },
+    [socket]
+  );
+
+  const denyParticipant = useCallback(
+    (targetSocketId: string) => {
+      if (!socket) return;
+      socket.emit('host:deny-entry', {
+        targetId: targetSocketId,
+        roomId: stateRef.current.roomId,
+      });
+      setCallState((prev) => ({
+        ...prev,
+        knockRequests: prev.knockRequests.filter((k) => k.socketId !== targetSocketId),
+      }));
+    },
+    [socket]
+  );
+
   // Keep refs to late-defined callbacks so socket listeners can call them safely
   toggleScreenShareRef.current = toggleScreenShare;
   leaveGroupCallRef.current = leaveGroupCall;
@@ -2530,5 +2646,7 @@ export function useWebGroupCall({
     hostRemoveParticipant,
     hostUpdateSettings,
     clearHostNotification,
+    admitParticipant,
+    denyParticipant,
   };
 }

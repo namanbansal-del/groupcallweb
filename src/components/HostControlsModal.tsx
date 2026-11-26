@@ -178,6 +178,31 @@ export const HostControlsModal: React.FC<HostControlsModalProps> = ({
                 <span className="switch-slider" />
               </label>
             </div>
+
+            {/* 5. Waiting Room / Ask to join */}
+            <div className="host-toggle-row">
+              <div className="host-toggle-item-info">
+                <div className="toggle-icon-wrap">
+                  <Shield size={18} color="#94A3B8" />
+                </div>
+                <div>
+                  <span className="toggle-item-title">Waiting Room</span>
+                  <span className="toggle-item-desc">
+                    Require host approval to admit or reject participants
+                  </span>
+                </div>
+              </div>
+              <label className="switch-toggle">
+                <input
+                  type="checkbox"
+                  checked={hostSettings.requireApprovalToJoin}
+                  onChange={(e) =>
+                    onUpdateSettings({ requireApprovalToJoin: e.target.checked })
+                  }
+                />
+                <span className="switch-slider" />
+              </label>
+            </div>
           </div>
         </div>
       </div>

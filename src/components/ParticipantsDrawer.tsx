@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { X, Search, Mic, MicOff, Video, VideoOff, Hand, Edit2, Shield, UserMinus, MonitorOff } from 'lucide-react';
-import type { Participant } from '../types';
+import { X, Search, Mic, MicOff, Video, VideoOff, Hand, Edit2, Shield, UserMinus, MonitorOff, UserCheck, UserX } from 'lucide-react';
+import type { Participant, KnockRequest } from '../types';
 
 interface ParticipantsDrawerProps {
   isOpen: boolean;
@@ -14,6 +14,9 @@ interface ParticipantsDrawerProps {
   onRemoveParticipant?: (id: string) => void;
   onMuteAll?: () => void;
   onOpenHostControls?: () => void;
+  knockRequests?: KnockRequest[];
+  onAdmit?: (socketId: string) => void;
+  onDeny?: (socketId: string) => void;
 }
 
 export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
@@ -28,6 +31,9 @@ export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
   onRemoveParticipant,
   onMuteAll,
   onOpenHostControls,
+  knockRequests = [],
+  onAdmit,
+  onDeny,
 }) => {
   const [search, setSearch] = useState('');
 
@@ -112,6 +118,47 @@ export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
               <Shield size={14} />
               <span>Host Controls</span>
             </button>
+          </div>
+        )}
+
+        {/* Waiting to Join (Knock requests for Host) */}
+        {isHost && knockRequests.length > 0 && (
+          <div className="drawer-waiting-section">
+            <div className="drawer-waiting-header">
+              <span className="drawer-waiting-title">Waiting to join ({knockRequests.length})</span>
+            </div>
+            <div className="drawer-waiting-list">
+              {knockRequests.map((req) => (
+                <div key={req.socketId} className="drawer-waiting-row">
+                  <div className="drawer-waiting-user">
+                    <div className="participant-avatar waiting-avatar">
+                      <span>{req.userName.charAt(0).toUpperCase()}</span>
+                    </div>
+                    <span className="drawer-waiting-name">{req.userName}</span>
+                  </div>
+                  <div className="drawer-waiting-actions">
+                    <button
+                      type="button"
+                      className="btn-drawer-deny"
+                      title="Deny entry"
+                      onClick={() => onDeny && onDeny(req.socketId)}
+                    >
+                      <UserX size={15} />
+                      <span>Deny</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-drawer-admit"
+                      title="Admit into call"
+                      onClick={() => onAdmit && onAdmit(req.socketId)}
+                    >
+                      <UserCheck size={15} />
+                      <span>Admit</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

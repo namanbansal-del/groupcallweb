@@ -4,6 +4,7 @@ import type { CallMode } from './types';
 import { useWebGroupCall } from './hooks/useWebGroupCall';
 import { Lobby } from './components/Lobby';
 import { ActiveCall } from './components/ActiveCall';
+import { WaitingApprovalScreen } from './components/WaitingApprovalScreen';
 
 export function App() {
   const [serverUrl, setServerUrl] = useState(() => {
@@ -128,10 +129,19 @@ export function App() {
   const isInCall =
     call.callState.status === 'joining' || call.callState.status === 'joined';
 
+  const isWaitingApproval =
+    call.callState.status === 'waiting_approval' || call.callState.status === 'denied';
+
   return (
-    <div className={`app-root ${!isInCall ? 'in-lobby' : ''}`}>
+    <div className={`app-root ${!isInCall && !isWaitingApproval ? 'in-lobby' : ''}`}>
       {isInCall ? (
         <ActiveCall call={call} />
+      ) : isWaitingApproval ? (
+        <WaitingApprovalScreen
+          status={call.callState.status as 'waiting_approval' | 'denied'}
+          roomId={call.callState.roomId}
+          onReturnToLobby={call.leaveGroupCall}
+        />
       ) : (
         <Lobby
           onJoin={handleJoin}

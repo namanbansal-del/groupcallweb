@@ -64,6 +64,8 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
     hostRemoveParticipant,
     hostUpdateSettings,
     clearHostNotification,
+    admitParticipant,
+    denyParticipant,
   } = call;
 
   const {
@@ -296,6 +298,41 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
           );
         })}
       </div>
+
+      {/* Host Admit/Deny Floating Banner (Google Meet style) */}
+      {callState.isHost && (callState.knockRequests || []).length > 0 && (
+        <div className="host-knock-banner">
+          {(callState.knockRequests || []).map((req) => (
+            <div key={req.socketId} className="host-knock-card">
+              <div className="host-knock-info">
+                <div className="host-knock-avatar">
+                  {req.userName.charAt(0).toUpperCase()}
+                </div>
+                <div className="host-knock-text">
+                  <span className="host-knock-name">{req.userName}</span>
+                  <span className="host-knock-sub">wants to join this call</span>
+                </div>
+              </div>
+              <div className="host-knock-actions">
+                <button
+                  type="button"
+                  className="btn-knock-deny"
+                  onClick={() => denyParticipant(req.socketId)}
+                >
+                  Deny
+                </button>
+                <button
+                  type="button"
+                  className="btn-knock-admit"
+                  onClick={() => admitParticipant(req.socketId)}
+                >
+                  Admit
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Host Meeting Notification Banner */}
       {callState.hostNotification && (
@@ -813,6 +850,9 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         onRemoveParticipant={hostRemoveParticipant}
         onMuteAll={hostMuteAll}
         onOpenHostControls={() => setIsHostControlsOpen(true)}
+        knockRequests={callState.knockRequests}
+        onAdmit={admitParticipant}
+        onDeny={denyParticipant}
       />
 
       {/* Change Name Modal Dialog */}

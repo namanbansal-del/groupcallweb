@@ -1,6 +1,6 @@
 export type CallMode = 'audio' | 'video';
 
-export type CallStatus = 'idle' | 'joining' | 'joined' | 'left';
+export type CallStatus = 'idle' | 'joining' | 'waiting_approval' | 'denied' | 'joined' | 'left';
 
 export interface Participant {
   id: string;
@@ -23,6 +23,13 @@ export interface HostSettings {
   allowChat: boolean;
   allowUnmute: boolean;
   allowCamera: boolean;
+  requireApprovalToJoin: boolean;
+}
+
+export interface KnockRequest {
+  socketId: string;
+  userId: string;
+  userName: string;
 }
 
 export interface GroupCallState {
@@ -39,6 +46,7 @@ export interface GroupCallState {
   isHost: boolean;
   hostSettings: HostSettings;
   hostNotification: string | null;
+  knockRequests: KnockRequest[];
   durationSec: number;
   error: string | null;
 }

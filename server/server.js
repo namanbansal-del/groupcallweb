@@ -50,6 +50,7 @@ const DEFAULT_ICE_SERVERS = [
 // Room & Socket State
 const rooms = new Map(); // roomCode -> Map<socketId, { socketId, userId, userName, isMuted, isCameraOff }>
 const socketMeta = new Map(); // socketId -> { roomCode, userId, userName }
+const roomMeta = new Map(); // roomCode -> { hostSocketId, requireApprovalToJoin, pendingKnocks: Map<socketId, { socketId, userId, userName, payload }> }
 
 // In-Memory User Auth Store
 const usersByPhone = new Map(); // phone -> { id, name, phone, password, createdAt }
@@ -295,6 +296,46 @@ function registerSocketHandlers(namespace) {
       const roomCode = (payload.roomCode || payload.roomId || STATIC_ROOM_CODE).trim().toUpperCase();
       const userName = payload.userName || payload.user?.name || socket.user?.name || `User_${socket.id.slice(0, 4)}`;
       const userId = payload.userId || payload.user?.id || socket.user?.id || `user_${socket.id.slice(0, 6)}`;
+      const isHost = Boolean(payload.isHost);
+      const isAdmitted = Boolean(payload.isAdmitted);
+
+      // Track room host metadata & approval settings
+      let meta = roomMeta.get(roomCode);
+      if (!meta) {
+        meta = {
+          hostSocketId: isHost ? socket.id : null,
+          requireApprovalToJoin: isHost, // by default enable approval if started by a host
+          pendingKnocks: new Map(),
+        };
+        roomMeta.set(roomCode, meta);
+      } else if (isHost) {
+        meta.hostSocketId = socket.id;
+      }
+
+      // Check if room requires host approval and user is not yet admitted
+      if (meta.hostSocketId && meta.requireApprovalToJoin && !isHost && meta.hostSocketId !== socket.id && !isAdmitted) {
+        const hostSocket = io.of('/').sockets.get(meta.hostSocketId) || io.of('/call').sockets.get(meta.hostSocketId);
+        if (hostSocket && hostSocket.connected) {
+          console.log(`[Waiting Room] ${userName} (${socket.id}) knocking to join '${roomCode}'`);
+          meta.pendingKnocks.set(socket.id, { socketId: socket.id, userId, userName, payload });
+
+          // Send knock request to the host
+          hostSocket.emit('room:knock-request', {
+            socketId: socket.id,
+            userId,
+            userName,
+            roomCode,
+          });
+
+          // Tell joiner to wait for approval
+          socket.emit('room:waiting-approval', { roomCode });
+
+          if (typeof ackCallback === 'function') {
+            ackCallback({ ok: true, status: 'waiting_approval', roomCode });
+          }
+          return;
+        }
+      }
 
       socket.join(roomCode);
 
@@ -621,9 +662,49 @@ function registerSocketHandlers(namespace) {
     // Host can update meeting permissions
     socket.on('host:settings-update', (payload) => {
       const { settings, roomId } = payload || {};
-      const roomCode = roomId || (socketMeta.get(socket.id)?.roomCode);
+      const roomCode = (roomId || (socketMeta.get(socket.id)?.roomCode) || '').toUpperCase();
       if (!roomCode) return;
+      const meta = roomMeta.get(roomCode);
+      if (meta && typeof settings?.requireApprovalToJoin === 'boolean') {
+        meta.requireApprovalToJoin = settings.requireApprovalToJoin;
+      }
       socket.to(roomCode).emit('peer:host-settings', { settings });
+    });
+
+    // Host admits a participant waiting in waiting room
+    socket.on('host:admit-entry', (payload = {}) => {
+      const { targetId, roomId } = payload;
+      const roomCode = (roomId || (socketMeta.get(socket.id)?.roomCode) || '').toUpperCase();
+      if (!roomCode || !targetId) return;
+
+      const meta = roomMeta.get(roomCode);
+      if (meta && meta.pendingKnocks?.has(targetId)) {
+        meta.pendingKnocks.delete(targetId);
+      }
+
+      const targetSocket = io.of('/').sockets.get(targetId) || io.of('/call').sockets.get(targetId);
+      if (targetSocket) {
+        console.log(`[Waiting Room] Host admitted ${targetId} into '${roomCode}'`);
+        targetSocket.emit('room:admitted', { roomCode });
+      }
+    });
+
+    // Host denies a participant waiting in waiting room
+    socket.on('host:deny-entry', (payload = {}) => {
+      const { targetId, roomId } = payload;
+      const roomCode = (roomId || (socketMeta.get(socket.id)?.roomCode) || '').toUpperCase();
+      if (!roomCode || !targetId) return;
+
+      const meta = roomMeta.get(roomCode);
+      if (meta && meta.pendingKnocks?.has(targetId)) {
+        meta.pendingKnocks.delete(targetId);
+      }
+
+      const targetSocket = io.of('/').sockets.get(targetId) || io.of('/call').sockets.get(targetId);
+      if (targetSocket) {
+        console.log(`[Waiting Room] Host denied entry for ${targetId} into '${roomCode}'`);
+        targetSocket.emit('room:denied', { roomCode });
+      }
     });
 
     // ── 7. LEAVE / DISCONNECT (Ghost Participant Cleanup) ──────────
@@ -654,6 +735,19 @@ function registerSocketHandlers(namespace) {
           rooms.delete(roomCode);
         }
         console.log(`[User Left] ${userName} (${socket.id}) from '${roomCode}'. Remaining: ${remainingCount}`);
+      }
+
+      // Cleanup host status and auto-admit any pending knocks if host leaves
+      const rMeta = roomMeta.get(roomCode);
+      if (rMeta && rMeta.hostSocketId === socket.id) {
+        rMeta.hostSocketId = null;
+        if (rMeta.pendingKnocks) {
+          for (const [waitingSid] of rMeta.pendingKnocks.entries()) {
+            const targetSocket = io.of('/').sockets.get(waitingSid) || io.of('/call').sockets.get(waitingSid);
+            if (targetSocket) targetSocket.emit('room:admitted', { roomCode });
+          }
+          rMeta.pendingKnocks.clear();
+        }
       }
 
       socketMeta.delete(socket.id);
