@@ -58,6 +58,8 @@ export function useWebGroupCall({
     isHandRaised: false,
     isScreenSharing: false,
     isHost: false,
+    hostSocketId: null,
+    startedAt: undefined,
     hostSettings: {
       allowScreenShare: true,
       allowChat: true,
@@ -99,6 +101,7 @@ export function useWebGroupCall({
   const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
   const processedCandidatesRef = useRef<Set<string>>(new Set());
   const timerRef = useRef<number | null>(null);
+  const startedAtRef = useRef<number | null>(null);
   const stateRef = useRef(callState);
   stateRef.current = callState;
   const toggleScreenShareRef = useRef<() => void>(() => {});
@@ -211,6 +214,7 @@ export function useWebGroupCall({
         isCameraOff?: boolean;
         isHandRaised?: boolean;
         isScreenSharing?: boolean;
+        isHost?: boolean;
         stream?: MediaStream | null;
         screenStream?: MediaStream | null;
       }
@@ -262,6 +266,7 @@ export function useWebGroupCall({
           isCameraOff: typeof info.isCameraOff === 'boolean' ? info.isCameraOff : existing.isCameraOff,
           isHandRaised: typeof info.isHandRaised === 'boolean' ? info.isHandRaised : existing.isHandRaised,
           isScreenSharing: typeof info.isScreenSharing === 'boolean' ? info.isScreenSharing : existing.isScreenSharing,
+          isHost: typeof info.isHost === 'boolean' ? info.isHost : existing.isHost,
           stream: info.stream !== undefined ? info.stream : existing.stream,
           screenStream: info.screenStream !== undefined ? info.screenStream : existing.screenStream,
         };
@@ -280,7 +285,7 @@ export function useWebGroupCall({
           isSpeaking: false,
           isHandRaised: info.isHandRaised ?? false,
           isScreenSharing: info.isScreenSharing ?? false,
-          isHost: false,
+          isHost: info.isHost ?? false,
           stream: info.stream || null,
           screenStream: info.screenStream || null,
         },
@@ -1159,7 +1164,13 @@ export function useWebGroupCall({
 
         if (timerRef.current) clearInterval(timerRef.current);
         timerRef.current = window.setInterval(() => {
-          setCallState((prev) => ({ ...prev, durationSec: prev.durationSec + 1 }));
+          setCallState((prev) => {
+            const start = startedAtRef.current || prev.startedAt;
+            const durationSec = start
+              ? Math.max(0, Math.floor((Date.now() - start) / 1000))
+              : prev.durationSec + 1;
+            return { ...prev, durationSec };
+          });
         }, 1000);
 
         setCallState((prev) => ({
@@ -1209,6 +1220,28 @@ export function useWebGroupCall({
                   }));
                 } else {
                   console.log(`[Web] Joined '${ack.roomCode}'. Total: ${ack.totalUsers}`);
+                  if (ack.startedAt) {
+                    startedAtRef.current = ack.startedAt;
+                    setCallState((prev) => ({
+                      ...prev,
+                      startedAt: ack.startedAt,
+                      durationSec: Math.max(0, Math.floor((Date.now() - ack.startedAt) / 1000)),
+                    }));
+                  }
+                  if (ack.hostSocketId) {
+                    setCallState((prev) => ({
+                      ...prev,
+                      hostSocketId: ack.hostSocketId,
+                      isHost: ack.hostSocketId === socket?.id || prev.isHost,
+                    }));
+                  }
+                  if (ack.peerInfo?.isHost !== undefined) {
+                    setCallState((prev) => ({
+                      ...prev,
+                      isHost: ack.peerInfo.isHost,
+                      localParticipant: { ...prev.localParticipant, isHost: ack.peerInfo.isHost },
+                    }));
+                  }
                 }
               }
             }
@@ -2035,6 +2068,11 @@ export function useWebGroupCall({
       console.log(`[Web Mesh] Received all-users list with ${rawUsers.length} peers`);
 
       const isFirst = rawUsers.length === 0;
+      const startedAt = payload?.startedAt;
+      const hostSocketId = payload?.hostSocketId;
+      if (startedAt) {
+        startedAtRef.current = startedAt;
+      }
 
       setCallState((prev) => {
         let currentList = prev.participants;
@@ -2049,14 +2087,25 @@ export function useWebGroupCall({
             isMuted: u.isMuted ?? false,
             isCameraOff: typeof u.isCameraOff === 'boolean' ? u.isCameraOff : false,
             isHandRaised: u.isHandRaised ?? false,
+            isHost: u.isHost ?? (hostSocketId ? hostSocketId === uid : false),
           });
         }
+        const isMeHost = hostSocketId
+          ? hostSocketId === socket?.id
+          : (isFirst || prev.isHost);
+
         return {
           ...prev,
+          startedAt: startedAt || prev.startedAt,
+          hostSocketId: hostSocketId || prev.hostSocketId,
+          durationSec: startedAt
+            ? Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
+            : prev.durationSec,
+          isHost: isMeHost,
           participants: currentList,
           localParticipant: {
             ...prev.localParticipant,
-            isHost: isFirst,
+            isHost: isMeHost,
           },
         };
       });
@@ -2097,6 +2146,7 @@ export function useWebGroupCall({
           userId,
           name: userName,
           isCameraOff: typeof payload.isCameraOff === 'boolean' ? payload.isCameraOff : false,
+          isHost: Boolean(payload.isHost),
         }),
       }));
 
@@ -2441,6 +2491,31 @@ export function useWebGroupCall({
       }));
     };
 
+    const onHostChanged = (payload: any = {}) => {
+      const newHost = payload.newHost || {};
+      const newHostSocketId = newHost.socketId;
+      if (!newHostSocketId) return;
+
+      const isMeNowHost = socket?.id === newHostSocketId || currentUser.id === newHost.userId;
+      console.log(`[Web] Host changed event: ${newHost.userName} (${newHostSocketId}) is now host. IsMeHost: ${isMeNowHost}`);
+      setCallState((prev) => ({
+        ...prev,
+        isHost: isMeNowHost,
+        hostSocketId: newHostSocketId,
+        hostNotification: isMeNowHost
+          ? 'You are now the meeting host.'
+          : `${newHost.userName || 'A participant'} is now the meeting host.`,
+        participants: prev.participants.map((p) => ({
+          ...p,
+          isHost: p.socketId === newHostSocketId || p.id === newHostSocketId,
+        })),
+        localParticipant: {
+          ...prev.localParticipant,
+          isHost: isMeNowHost,
+        },
+      }));
+    };
+
     // Register clean, non-duplicate standard socket events
     socket.on('all-users', onAllUsers);
     socket.on('user-connected', onUserConnected);
@@ -2470,6 +2545,7 @@ export function useWebGroupCall({
     socket.on('host-remove', onHostRemove);
     socket.on('peer:host-settings', onHostSettingsUpdate);
     socket.on('host:settings-update', onHostSettingsUpdate);
+    socket.on('host-changed', onHostChanged);
 
     return () => {
       socket.off('all-users', onAllUsers);
@@ -2498,6 +2574,7 @@ export function useWebGroupCall({
       socket.off('host-remove', onHostRemove);
       socket.off('peer:host-settings', onHostSettingsUpdate);
       socket.off('host:settings-update', onHostSettingsUpdate);
+      socket.off('host-changed', onHostChanged);
     };
   }, [
     createPeer,
@@ -2692,6 +2769,18 @@ export function useWebGroupCall({
     [socket]
   );
 
+  const makeHost = useCallback(
+    (targetSocketId: string) => {
+      if (!socket?.connected) return;
+      socket.emit('make-host', { targetSocketId }, (res: any) => {
+        if (res && !res.ok) {
+          alert(res.error || 'Failed to transfer host role');
+        }
+      });
+    },
+    [socket]
+  );
+
   // Keep refs to late-defined callbacks so socket listeners can call them safely
   toggleScreenShareRef.current = toggleScreenShare;
   leaveGroupCallRef.current = leaveGroupCall;
@@ -2723,5 +2812,6 @@ export function useWebGroupCall({
     clearHostNotification,
     admitParticipant,
     denyParticipant,
+    makeHost,
   };
 }

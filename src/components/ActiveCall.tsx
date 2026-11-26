@@ -66,6 +66,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
     clearHostNotification,
     admitParticipant,
     denyParticipant,
+    makeHost,
   } = call;
 
   const {
@@ -853,6 +854,7 @@ export const ActiveCall: React.FC<ActiveCallProps> = ({ call }) => {
         knockRequests={callState.knockRequests}
         onAdmit={admitParticipant}
         onDeny={denyParticipant}
+        onMakeHost={makeHost}
       />
 
       {/* Change Name Modal Dialog */}

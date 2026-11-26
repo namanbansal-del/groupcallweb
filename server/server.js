@@ -301,15 +301,23 @@ function registerSocketHandlers(namespace) {
 
       // Track room host metadata & approval settings
       let meta = roomMeta.get(roomCode);
+      const isRoomEmpty = !rooms.has(roomCode) || rooms.get(roomCode).size === 0;
       if (!meta) {
         meta = {
-          hostSocketId: isHost ? socket.id : null,
+          hostSocketId: socket.id, // First user joining is automatically Host
           requireApprovalToJoin: isHost, // by default enable approval if started by a host
           pendingKnocks: new Map(),
+          startedAt: Date.now(), // Synced meeting room start time
         };
         roomMeta.set(roomCode, meta);
-      } else if (isHost) {
-        meta.hostSocketId = socket.id;
+      } else {
+        if (!meta.startedAt) meta.startedAt = Date.now();
+        if (isRoomEmpty) {
+          meta.hostSocketId = socket.id;
+          meta.startedAt = Date.now();
+        } else if (isHost && !meta.hostSocketId) {
+          meta.hostSocketId = socket.id;
+        }
       }
 
       // Check if room requires host approval and user is not yet admitted
@@ -381,12 +389,14 @@ function registerSocketHandlers(namespace) {
           userId: existing.userId,
           isMuted: existing.isMuted,
           isCameraOff: existing.isCameraOff,
+          isHost: meta.hostSocketId === existing.socketId,
         });
         legacyPeers.push({
           id: existing.socketId,
           name: existing.userName,
           isMuted: existing.isMuted,
           isCameraOff: existing.isCameraOff,
+          isHost: meta.hostSocketId === existing.socketId,
         });
       }
 
@@ -402,15 +412,24 @@ function registerSocketHandlers(namespace) {
       socketMeta.set(socket.id, { roomCode, userId, userName });
 
       // A. Standard event to joiner
-      socket.emit('all-users', { users: existingUsers });
+      socket.emit('all-users', {
+        users: existingUsers,
+        startedAt: meta.startedAt,
+        hostSocketId: meta.hostSocketId,
+      });
       // B. Backward-compatible event to joiner
-      socket.emit('room:peers', { peers: legacyPeers });
+      socket.emit('room:peers', {
+        peers: legacyPeers,
+        startedAt: meta.startedAt,
+        hostSocketId: meta.hostSocketId,
+      });
 
       // C. Broadcast to existing users in room
       const connData = {
         socketId: socket.id,
         userName,
         userId,
+        isHost: meta.hostSocketId === socket.id,
         totalUsers: room.size,
       };
       socket.to(roomCode).emit('user-connected', connData);
@@ -419,13 +438,20 @@ function registerSocketHandlers(namespace) {
 
       // Backward-compatible
       socket.to(roomCode).emit('peer:joined', {
-        user: { id: socket.id, name: userName },
+        user: { id: socket.id, name: userName, isHost: meta.hostSocketId === socket.id },
       });
 
-      console.log(`[Join Room] ${userName} (${socket.id}) in '${roomCode}'. Total: ${room.size}`);
+      console.log(`[Join Room] ${userName} (${socket.id}) in '${roomCode}' (Host: ${meta.hostSocketId === socket.id ? 'YES' : 'NO'}). Total: ${room.size}`);
 
       if (typeof ackCallback === 'function') {
-        ackCallback({ ok: true, roomCode, totalUsers: room.size });
+        ackCallback({
+          ok: true,
+          roomCode,
+          totalUsers: room.size,
+          startedAt: meta.startedAt,
+          hostSocketId: meta.hostSocketId,
+          peerInfo: { isHost: meta.hostSocketId === socket.id },
+        });
       }
     };
 
@@ -809,6 +835,45 @@ function registerSocketHandlers(namespace) {
       }
     });
 
+    // ── Host Transfer (Make another participant Host) ──────────────
+    socket.on('make-host', (payload = {}, ackCallback) => {
+      const targetSocketId = payload.targetSocketId || payload.targetId;
+      const meta = socketMeta.get(socket.id);
+      if (!meta) return;
+      const rMeta = roomMeta.get(meta.roomCode);
+      if (!rMeta || rMeta.hostSocketId !== socket.id) {
+        if (typeof ackCallback === 'function') {
+          ackCallback({ ok: false, error: 'Only current host can transfer host role' });
+        }
+        return;
+      }
+      const room = rooms.get(meta.roomCode);
+      if (!room || !room.has(targetSocketId)) {
+        if (typeof ackCallback === 'function') {
+          ackCallback({ ok: false, error: 'Target participant not found in room' });
+        }
+        return;
+      }
+      rMeta.hostSocketId = targetSocketId;
+      const targetUser = room.get(targetSocketId);
+      const hostChangedData = {
+        newHost: {
+          socketId: targetSocketId,
+          userId: targetUser.userId,
+          userName: targetUser.userName,
+        },
+        previousHostSocketId: socket.id,
+        roomCode: meta.roomCode,
+      };
+      namespace.to(meta.roomCode).emit('host-changed', hostChangedData);
+      io.of('/').to(meta.roomCode).emit('host-changed', hostChangedData);
+      io.of('/call').to(meta.roomCode).emit('host-changed', hostChangedData);
+      if (typeof ackCallback === 'function') {
+        ackCallback({ ok: true, newHostSocketId: targetSocketId });
+      }
+      console.log(`[Host Transfer] ${socket.id} transferred host to ${targetUser.userName} (${targetSocketId}) in '${meta.roomCode}'`);
+    });
+
     // ── 7. LEAVE / DISCONNECT (Ghost Participant Cleanup) ──────────
     const handleLeave = () => {
       const meta = socketMeta.get(socket.id);
@@ -844,10 +909,29 @@ function registerSocketHandlers(namespace) {
         console.log(`[User Left] ${userName} (${socket.id}) from '${roomCode}'. Remaining: ${remainingCount}`);
       }
 
-      // Cleanup host status and auto-admit any pending knocks if host leaves
+      // Cleanup host status, auto-reassign host if host leaves, and auto-admit any pending knocks
       const rMeta = roomMeta.get(roomCode);
       if (rMeta && rMeta.hostSocketId === socket.id) {
-        rMeta.hostSocketId = null;
+        if (room && room.size > 0) {
+          const nextPeer = Array.from(room.values())[0];
+          rMeta.hostSocketId = nextPeer.socketId;
+          const hostChangedData = {
+            newHost: {
+              socketId: nextPeer.socketId,
+              userId: nextPeer.userId,
+              userName: nextPeer.userName,
+            },
+            previousHostSocketId: socket.id,
+            roomCode,
+          };
+          namespace.to(roomCode).emit('host-changed', hostChangedData);
+          io.of('/').to(roomCode).emit('host-changed', hostChangedData);
+          io.of('/call').to(roomCode).emit('host-changed', hostChangedData);
+          console.log(`[Host Auto-Reassign] Transferred host to ${nextPeer.userName} (${nextPeer.socketId}) in '${roomCode}'`);
+        } else {
+          rMeta.hostSocketId = null;
+        }
+
         if (rMeta.pendingKnocks) {
           for (const [waitingSid] of rMeta.pendingKnocks.entries()) {
             const targetSocket = io.of('/').sockets.get(waitingSid) || io.of('/call').sockets.get(waitingSid);

@@ -3681,6 +3681,16 @@ body,
   transition: all 0.15s ease;
 }
 
+.btn-host-make-host {
+  background: rgba(245, 158, 11, 0.15);
+  color: #F59E0B;
+}
+
+.btn-host-make-host:hover {
+  background: #F59E0B;
+  color: #000000;
+}
+
 .btn-host-mute {
   background: rgba(239, 68, 68, 0.12);
   color: #EF4444;

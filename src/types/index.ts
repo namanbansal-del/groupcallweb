@@ -44,6 +44,8 @@ export interface GroupCallState {
   isHandRaised: boolean;
   isScreenSharing: boolean;
   isHost: boolean;
+  hostSocketId?: string | null;
+  startedAt?: number;
   hostSettings: HostSettings;
   hostNotification: string | null;
   knockRequests: KnockRequest[];

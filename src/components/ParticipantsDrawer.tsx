@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { X, Search, Mic, MicOff, Video, VideoOff, Hand, Edit2, Shield, UserMinus, MonitorOff, UserCheck, UserX } from 'lucide-react';
+import { X, Search, Mic, MicOff, Video, VideoOff, Hand, Edit2, Shield, UserMinus, MonitorOff, UserCheck, UserX, Crown } from 'lucide-react';
 import type { Participant, KnockRequest } from '../types';
 
 interface ParticipantsDrawerProps {
@@ -17,6 +17,7 @@ interface ParticipantsDrawerProps {
   knockRequests?: KnockRequest[];
   onAdmit?: (socketId: string) => void;
   onDeny?: (socketId: string) => void;
+  onMakeHost?: (socketId: string) => void;
 }
 
 export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
@@ -34,6 +35,7 @@ export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
   knockRequests = [],
   onAdmit,
   onDeny,
+  onMakeHost,
 }) => {
   const [search, setSearch] = useState('');
 
@@ -253,6 +255,20 @@ export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
                     {/* Host Participant Action Buttons */}
                     {isHost && !isLocal && (
                       <div className="host-row-actions">
+                        {onMakeHost && !p.isHost && (
+                          <button
+                            type="button"
+                            className="btn-host-action btn-host-make-host"
+                            onClick={() => {
+                              if (window.confirm(`Transfer meeting host role to ${p.name}?`)) {
+                                onMakeHost(p.socketId || p.id);
+                              }
+                            }}
+                            title={`Make ${p.name} Host`}
+                          >
+                            <Crown size={13} color="#F59E0B" />
+                          </button>
+                        )}
                         {!p.isMuted && onMuteParticipant && (
                           <button
                             type="button"
