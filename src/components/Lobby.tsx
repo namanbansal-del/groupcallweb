@@ -348,8 +348,8 @@ export const Lobby: React.FC<LobbyProps> = ({
                   <span>GroupCall 50 Web</span>
                 </div>
 
-                {/* Account / Sign In Pill */}
-                {authenticatedUser ? (
+                {/* Account Pill (only when signed in) */}
+                {authenticatedUser && (
                   <div className="lobby-account-pill">
                     <div className="lobby-account-avatar">
                       {authenticatedUser.name.slice(0, 1).toUpperCase()}
@@ -364,15 +364,6 @@ export const Lobby: React.FC<LobbyProps> = ({
                       <LogOut size={13} />
                     </button>
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="lobby-signin-btn"
-                    onClick={() => setShowAuthModal(true)}
-                  >
-                    <LogIn size={14} />
-                    <span>Sign In</span>
-                  </button>
                 )}
               </div>
 
@@ -487,7 +478,6 @@ export const Lobby: React.FC<LobbyProps> = ({
                     <strong>Account Required</strong>
                     <span>Sign in or register an account to enter video calls</span>
                   </div>
-                  <button type="button" className="auth-gate-pill-btn">Sign In</button>
                 </div>
               )}
 
