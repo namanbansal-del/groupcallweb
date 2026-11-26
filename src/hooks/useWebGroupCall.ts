@@ -103,6 +103,7 @@ export function useWebGroupCall({
   stateRef.current = callState;
   const toggleScreenShareRef = useRef<() => void>(() => {});
   const leaveGroupCallRef = useRef<() => void>(() => {});
+  const onUserDisconnectedRef = useRef<((payload: any) => void) | null>(null);
   const iceRestartAttemptsRef = useRef<Map<string, number>>(new Map());
   const MAX_ICE_RESTART_ATTEMPTS = 3;
 
@@ -233,7 +234,8 @@ export function useWebGroupCall({
         (p) =>
           p.id === primaryId ||
           (info.socketId && (p.socketId === info.socketId || p.id === info.socketId)) ||
-          (info.userId && (p.userId === info.userId || p.id === info.userId))
+          (info.userId && (p.userId === info.userId || p.id === info.userId)) ||
+          (info.name && p.name && info.name === p.name && (info.name.startsWith('User_') || !info.name.includes(' ')))
       );
 
       if (index >= 0) {
@@ -758,6 +760,16 @@ export function useWebGroupCall({
         setupDataChannel(remoteSocketId, event.channel);
       };
 
+      // Handle peer connection state transitions to reap dead/ghost peers immediately
+      pc.onconnectionstatechange = () => {
+        const cState = pc.connectionState;
+        console.log(`[Web Mesh] Connection state for ${remoteSocketId}: ${cState}`);
+        if (cState === 'failed' || cState === 'closed') {
+          console.warn(`[Web Mesh] Peer connection ${cState} with ${remoteSocketId}, removing tile immediately.`);
+          onUserDisconnectedRef.current?.({ socketId: remoteSocketId, userId: remoteSocketId });
+        }
+      };
+
       // Handle ICE connection state changes and auto-restart on disconnect/failure
       pc.oniceconnectionstatechange = () => {
         const iceState = pc.iceConnectionState;
@@ -766,11 +778,8 @@ export function useWebGroupCall({
           const attempts = (iceRestartAttemptsRef.current.get(remoteSocketId) || 0) + 1;
           iceRestartAttemptsRef.current.set(remoteSocketId, attempts);
           if (attempts > MAX_ICE_RESTART_ATTEMPTS) {
-            console.warn(`[Web Mesh] ICE restart limit reached for ${remoteSocketId}, stopping retries`);
-            setCallState((prev) => ({
-              ...prev,
-              error: 'Connection to a participant was lost. Please refresh to reconnect.',
-            }));
+            console.warn(`[Web Mesh] ICE restart limit reached for ${remoteSocketId}, removing ghost participant.`);
+            onUserDisconnectedRef.current?.({ socketId: remoteSocketId, userId: remoteSocketId });
             return;
           }
           console.warn(`[Web Mesh] ICE ${iceState} with ${remoteSocketId}. Triggering restartIce (attempt ${attempts})...`);
@@ -2165,6 +2174,8 @@ export function useWebGroupCall({
       const peerId = payload.socketId || payload.userId || payload.id;
       if (!peerId) return;
 
+      console.log(`[Web Mesh] User disconnected / removing ghost tile:`, peerId);
+
       // Close WebRTC peer connection
       for (const [key, pc] of peersRef.current.entries()) {
         if (key === peerId || key === payload.socketId || key === payload.userId) {
@@ -2211,6 +2222,7 @@ export function useWebGroupCall({
         ),
       }));
     };
+    onUserDisconnectedRef.current = onUserDisconnected;
 
     // 7. Peer Media Toggles
     const onPeerToggleAudio = ({ socketId, userId, id, enabled }: any) => {
@@ -2459,6 +2471,22 @@ export function useWebGroupCall({
       cleanup();
     };
   }, [cleanup]);
+
+  // Broadcast instant leave on page unload / tab close / refresh
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (socket && stateRef.current.roomId) {
+        socket.emit('leave-room', { roomCode: stateRef.current.roomId });
+        socket.emit('user-disconnected', { socketId: socket.id, roomCode: stateRef.current.roomId });
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handleBeforeUnload);
+    };
+  }, [socket]);
 
   const broadcast = useCallback((obj: unknown) => {
     const msg = JSON.stringify(obj);

@@ -33,9 +33,18 @@ export function App() {
       if (!savedName) {
         savedName = localStorage.getItem('groupcall_user_name');
       }
+      // Persistent device user ID so page refreshes never spawn duplicate ghost participant IDs
+      let deviceId = localStorage.getItem('groupcall_device_id');
+      if (!deviceId) {
+        deviceId = `usr_${Math.random().toString(36).substring(2, 9)}`;
+        localStorage.setItem('groupcall_device_id', deviceId);
+      }
+      if (!savedId) {
+        savedId = deviceId;
+      }
     } catch {}
     return {
-      id: savedId || `web_user_${Math.floor(1000 + Math.random() * 9000)}`,
+      id: savedId || `usr_${Math.random().toString(36).substring(2, 9)}`,
       name: savedName || 'Alex Johnson',
     };
   });

@@ -271,8 +271,8 @@ const server = http.createServer(async (req, res) => {
 
 const io = new Server(server, {
   cors: { origin: '*' },
-  pingTimeout: 30000,
-  pingInterval: 10000,
+  pingTimeout: 10000,
+  pingInterval: 5000,
 });
 
 function registerSocketHandlers(namespace) {
@@ -344,10 +344,37 @@ function registerSocketHandlers(namespace) {
       }
       const room = rooms.get(roomCode);
 
-      // Collect existing users to send to the joiner
+      // Auto-prune ghost sockets: If this user already exists from a prior connection (e.g. page refresh),
+      // prune the stale socket immediately and notify all participants!
+      for (const [existingSid, existingP] of room.entries()) {
+        if (
+          existingSid !== socket.id &&
+          (existingP.userId === userId ||
+            (existingP.userName &&
+              existingP.userName === userName &&
+              (userName.startsWith('User_') || !userName.includes(' '))))
+        ) {
+          console.log(`[Join Room] Pruning ghost participant ${existingSid} (${existingP.userName}) for newly connected socket ${socket.id}`);
+          room.delete(existingSid);
+          socketMeta.delete(existingSid);
+          const pruneEvt = { socketId: existingSid, userId: existingP.userId, userName: existingP.userName, remainingCount: room.size };
+          namespace.to(roomCode).emit('user-disconnected', pruneEvt);
+          io.of('/').to(roomCode).emit('user-disconnected', pruneEvt);
+          io.of('/call').to(roomCode).emit('user-disconnected', pruneEvt);
+          io.of('/').to(roomCode).emit('user-left', pruneEvt);
+          io.of('/call').to(roomCode).emit('user-left', pruneEvt);
+        }
+      }
+
+      // Collect existing users to send to the joiner, filtering out any dead sockets
       const existingUsers = [];
       const legacyPeers = [];
-      for (const [, existing] of room.entries()) {
+      for (const [sid, existing] of room.entries()) {
+        const liveSocket = io.of('/').sockets.get(sid) || io.of('/call').sockets.get(sid);
+        if (liveSocket && !liveSocket.connected) {
+          room.delete(sid);
+          continue;
+        }
         existingUsers.push({
           socketId: existing.socketId,
           userName: existing.userName,
@@ -711,7 +738,7 @@ function registerSocketHandlers(namespace) {
     const handleLeave = () => {
       const meta = socketMeta.get(socket.id);
       if (!meta) return;
-      const { roomCode, userName } = meta;
+      const { roomCode, userName, userId } = meta;
       const room = rooms.get(roomCode);
 
       if (room) {
@@ -720,16 +747,21 @@ function registerSocketHandlers(namespace) {
 
         const dcEvent = {
           socketId: socket.id,
-          userId: socket.id,
+          userId: userId || socket.id,
           userName,
           remainingCount,
         };
 
-        // Broadcast cleanup events
-        socket.to(roomCode).emit('user-disconnected', dcEvent);
-        socket.to(roomCode).emit('user-left', dcEvent);
-        socket.to(roomCode).emit('peer:left', { userId: socket.id, socketId: socket.id });
-        socket.to(roomCode).emit('participant-left', dcEvent);
+        // Broadcast cleanup events across BOTH namespaces so every connected participant receives it
+        namespace.to(roomCode).emit('user-disconnected', dcEvent);
+        io.of('/').to(roomCode).emit('user-disconnected', dcEvent);
+        io.of('/call').to(roomCode).emit('user-disconnected', dcEvent);
+        io.of('/').to(roomCode).emit('user-left', dcEvent);
+        io.of('/call').to(roomCode).emit('user-left', dcEvent);
+        io.of('/').to(roomCode).emit('peer:left', { userId: userId || socket.id, socketId: socket.id });
+        io.of('/call').to(roomCode).emit('peer:left', { userId: userId || socket.id, socketId: socket.id });
+        io.of('/').to(roomCode).emit('participant-left', dcEvent);
+        io.of('/call').to(roomCode).emit('participant-left', dcEvent);
 
         if (room.size === 0) {
           rooms.delete(roomCode);
@@ -763,6 +795,29 @@ function registerSocketHandlers(namespace) {
 // Support both root '/' and '/call' namespaces
 registerSocketHandlers(io.of('/'));
 registerSocketHandlers(io.of('/call'));
+
+// Periodic Zombie Socket Reaper (Every 5 seconds)
+// Purges any dropped or abruptly closed sockets that missed a disconnect event
+setInterval(() => {
+  for (const [roomCode, room] of rooms.entries()) {
+    for (const [sid, p] of room.entries()) {
+      const liveSocket = io.of('/').sockets.get(sid) || io.of('/call').sockets.get(sid);
+      if (!liveSocket || !liveSocket.connected) {
+        console.log(`[Zombie Reaper] Removing dead socket ${sid} (${p.userName}) from '${roomCode}'`);
+        room.delete(sid);
+        socketMeta.delete(sid);
+        const dcEvent = { socketId: sid, userId: p.userId, userName: p.userName, remainingCount: room.size };
+        io.of('/').to(roomCode).emit('user-disconnected', dcEvent);
+        io.of('/call').to(roomCode).emit('user-disconnected', dcEvent);
+        io.of('/').to(roomCode).emit('user-left', dcEvent);
+        io.of('/call').to(roomCode).emit('user-left', dcEvent);
+      }
+    }
+    if (room.size === 0) {
+      rooms.delete(roomCode);
+    }
+  }
+}, 5000);
 
 server.listen(PORT, () => {
   console.log(`\n🚀 GroupCall Multi-User Google Meet Signaling Server running on http://localhost:${PORT}`);
