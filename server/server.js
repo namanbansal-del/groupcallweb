@@ -294,7 +294,7 @@ function registerSocketHandlers(namespace) {
     // ── 1. JOIN ROOM ───────────────────────────────────────────────
     const handleJoin = (payload = {}, ackCallback) => {
       const roomCode = (payload.roomCode || payload.roomId || STATIC_ROOM_CODE).trim().toUpperCase();
-      const userName = payload.userName || payload.user?.name || socket.user?.name || `User_${socket.id.slice(0, 4)}`;
+      const userName = payload.userName || payload.name || payload.user?.name || socket.user?.name || `User_${socket.id.slice(0, 4)}`;
       const userId = payload.userId || payload.user?.id || socket.user?.id || `user_${socket.id.slice(0, 6)}`;
       const isHost = Boolean(payload.isHost);
       const isAdmitted = Boolean(payload.isAdmitted);
@@ -606,19 +606,52 @@ function registerSocketHandlers(namespace) {
       if (!roomCode || !targetId) return;
       const room = rooms.get(roomCode);
       if (!room) return;
+      let matchedSid = targetId;
       for (const [sid, p] of room.entries()) {
         if (sid === targetId || p.userId === targetId || p.socketId === targetId) {
           p.isMuted = true;
+          matchedSid = sid;
           break;
         }
       }
-      socket.to(roomCode).emit('peer:toggle-audio', { socketId: targetId, enabled: false });
-      socket.to(roomCode).emit('toggle-audio', { socketId: targetId, enabled: false });
-      socket.to(roomCode).emit('peer:media-toggle', {
+      const muteData = {
+        socketId: matchedSid,
+        targetId,
         userId: targetId,
+        id: matchedSid,
+        enabled: false,
+        isMuted: true,
+      };
+      namespace.to(roomCode).emit('host:mute-user', muteData);
+      namespace.to(roomCode).emit('peer:toggle-audio', muteData);
+      namespace.to(roomCode).emit('toggle-audio', muteData);
+      namespace.to(roomCode).emit('peer:media-toggle', {
+        userId: targetId,
+        socketId: matchedSid,
         isMuted: true,
         isCameraOff: false,
       });
+
+      io.of('/').to(roomCode).emit('host:mute-user', muteData);
+      io.of('/').to(roomCode).emit('peer:toggle-audio', muteData);
+      io.of('/').to(roomCode).emit('toggle-audio', muteData);
+      io.of('/').to(roomCode).emit('peer:media-toggle', {
+        userId: targetId,
+        socketId: matchedSid,
+        isMuted: true,
+        isCameraOff: false,
+      });
+
+      io.of('/call').to(roomCode).emit('host:mute-user', muteData);
+      io.of('/call').to(roomCode).emit('peer:toggle-audio', muteData);
+      io.of('/call').to(roomCode).emit('toggle-audio', muteData);
+      io.of('/call').to(roomCode).emit('peer:media-toggle', {
+        userId: targetId,
+        socketId: matchedSid,
+        isMuted: true,
+        isCameraOff: false,
+      });
+      console.log(`[Host Control] Host ${socket.id} muted participant ${targetId} in '${roomCode}'`);
     });
 
     // Host can mute everyone
@@ -628,16 +661,58 @@ function registerSocketHandlers(namespace) {
       if (!roomCode) return;
       const room = rooms.get(roomCode);
       if (!room) return;
+
       for (const [sid, p] of room.entries()) {
-        p.isMuted = true;
+        if (sid !== socket.id) {
+          p.isMuted = true;
+        }
       }
-      socket.to(roomCode).emit('peer:toggle-audio', { socketId: socket.id, enabled: false });
-      socket.to(roomCode).emit('toggle-audio', { socketId: socket.id, enabled: false });
-      socket.to(roomCode).emit('peer:media-toggle', {
-        userId: socket.id,
-        isMuted: true,
-        isCameraOff: false,
-      });
+
+      const muteAllPayload = { hostSocketId: socket.id, roomCode };
+      // Broadcast host:mute-all across namespaces
+      namespace.to(roomCode).emit('host:mute-all', muteAllPayload);
+      io.of('/').to(roomCode).emit('host:mute-all', muteAllPayload);
+      io.of('/call').to(roomCode).emit('host:mute-all', muteAllPayload);
+
+      // Explicitly broadcast toggle-audio for every muted participant so UI badges immediately update
+      for (const [sid, p] of room.entries()) {
+        if (sid !== socket.id) {
+          const muteData = {
+            socketId: sid,
+            userId: p.userId,
+            id: sid,
+            enabled: false,
+            isMuted: true,
+          };
+          namespace.to(roomCode).emit('peer:toggle-audio', muteData);
+          namespace.to(roomCode).emit('toggle-audio', muteData);
+          namespace.to(roomCode).emit('peer:media-toggle', {
+            userId: p.userId || sid,
+            socketId: sid,
+            isMuted: true,
+            isCameraOff: p.isCameraOff || false,
+          });
+
+          io.of('/').to(roomCode).emit('peer:toggle-audio', muteData);
+          io.of('/').to(roomCode).emit('toggle-audio', muteData);
+          io.of('/').to(roomCode).emit('peer:media-toggle', {
+            userId: p.userId || sid,
+            socketId: sid,
+            isMuted: true,
+            isCameraOff: p.isCameraOff || false,
+          });
+
+          io.of('/call').to(roomCode).emit('peer:toggle-audio', muteData);
+          io.of('/call').to(roomCode).emit('toggle-audio', muteData);
+          io.of('/call').to(roomCode).emit('peer:media-toggle', {
+            userId: p.userId || sid,
+            socketId: sid,
+            isMuted: true,
+            isCameraOff: p.isCameraOff || false,
+          });
+        }
+      }
+      console.log(`[Host Control] Host ${socket.id} muted all participants in '${roomCode}'`);
     });
 
     // Host can stop a participant's screen share

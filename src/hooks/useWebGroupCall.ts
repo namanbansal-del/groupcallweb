@@ -351,7 +351,12 @@ export function useWebGroupCall({
           }
 
           if (data.type === 'host-mute-all') {
-            if (!stateRef.current.isHost) {
+            const isMeHost =
+              stateRef.current.isHost ||
+              (data.hostSocketId &&
+                (data.hostSocketId === socket?.id || data.hostSocketId === currentUser.id));
+
+            if (!isMeHost) {
               localStreamRef.current?.getAudioTracks().forEach((t) => {
                 t.enabled = false;
               });
@@ -359,11 +364,17 @@ export function useWebGroupCall({
                 ...p,
                 isMuted: true,
                 localParticipant: { ...p.localParticipant, isMuted: true },
+                participants: p.participants.map((part) => ({ ...part, isMuted: true })),
                 hostNotification: 'All participants were muted by the meeting host.',
               }));
               if (socket?.connected) {
-                socket.emit('toggle-audio', { enabled: false });
+                socket.emit('toggle-audio', { enabled: false, isMuted: true });
               }
+            } else {
+              setCallState((p) => ({
+                ...p,
+                participants: p.participants.map((part) => ({ ...part, isMuted: true })),
+              }));
             }
             return;
           }
@@ -1934,23 +1945,38 @@ export function useWebGroupCall({
     [currentUser.id, socket]
   );
 
-  const onHostMuteAll = useCallback(() => {
-    setCallState((prev) => ({
-      ...prev,
-      participants: prev.participants.map((p) => ({ ...p, isMuted: true })),
-      hostNotification: 'All participants have been muted.',
-    }));
-    if (currentUser.id) {
-      localStreamRef.current?.getAudioTracks().forEach((t) => {
-        t.enabled = false;
-      });
+  const onHostMuteAll = useCallback(
+    (payload: any = {}) => {
+      const isMeHost =
+        stateRef.current.isHost ||
+        (payload?.hostSocketId &&
+          (payload.hostSocketId === socket?.id || payload.hostSocketId === currentUser.id));
+
       setCallState((prev) => ({
         ...prev,
-        isMuted: true,
-        localParticipant: { ...prev.localParticipant, isMuted: true },
+        participants: prev.participants.map((p) => ({ ...p, isMuted: true })),
+        hostNotification: isMeHost
+          ? 'You muted all participants.'
+          : 'All participants were muted by the meeting host.',
+        ...(isMeHost
+          ? {}
+          : {
+              isMuted: true,
+              localParticipant: { ...prev.localParticipant, isMuted: true },
+            }),
       }));
-    }
-  }, [currentUser.id]);
+
+      if (!isMeHost) {
+        localStreamRef.current?.getAudioTracks().forEach((t) => {
+          t.enabled = false;
+        });
+        if (socket?.connected) {
+          socket.emit('toggle-audio', { enabled: false, isMuted: true });
+        }
+      }
+    },
+    [currentUser.id, socket]
+  );
 
   const onHostStopScreenShare = useCallback(
     (payload: any = {}) => {
@@ -2225,16 +2251,35 @@ export function useWebGroupCall({
     onUserDisconnectedRef.current = onUserDisconnected;
 
     // 7. Peer Media Toggles
-    const onPeerToggleAudio = ({ socketId, userId, id, enabled }: any) => {
+    const onPeerToggleAudio = ({ socketId, userId, id, enabled, isMuted }: any) => {
       const peerId = socketId || userId || id;
       if (!peerId) return;
+      const effectiveMuted = typeof isMuted === 'boolean' ? isMuted : !enabled;
       setCallState((prev) => ({
         ...prev,
         participants: prev.participants.map((p) =>
           p.id === peerId || p.socketId === peerId || p.userId === peerId
-            ? { ...p, isMuted: !enabled }
+            ? { ...p, isMuted: effectiveMuted }
             : p
         ),
+      }));
+    };
+
+    const onPeerMediaToggle = ({ socketId, userId, id, isMuted, isCameraOff }: any) => {
+      const peerId = socketId || userId || id;
+      if (!peerId) return;
+      setCallState((prev) => ({
+        ...prev,
+        participants: prev.participants.map((p) => {
+          if (p.id === peerId || p.socketId === peerId || p.userId === peerId) {
+            return {
+              ...p,
+              ...(typeof isMuted === 'boolean' ? { isMuted } : {}),
+              ...(typeof isCameraOff === 'boolean' ? { isCameraOff } : {}),
+            };
+          }
+          return p;
+        }),
       }));
     };
 
@@ -2408,6 +2453,7 @@ export function useWebGroupCall({
     socket.on('toggle-video', onPeerToggleVideo);
     socket.on('peer:toggle-audio', onPeerToggleAudio);
     socket.on('peer:toggle-video', onPeerToggleVideo);
+    socket.on('peer:media-toggle', onPeerMediaToggle);
     socket.on('toggle-screen-share', onPeerToggleScreenShare);
     socket.on('peer:toggle-screen-share', onPeerToggleScreenShare);
     socket.on('hand-raise', onPeerHandRaise);
@@ -2437,6 +2483,7 @@ export function useWebGroupCall({
       socket.off('toggle-video', onPeerToggleVideo);
       socket.off('peer:toggle-audio', onPeerToggleAudio);
       socket.off('peer:toggle-video', onPeerToggleVideo);
+      socket.off('peer:media-toggle', onPeerMediaToggle);
       socket.off('toggle-screen-share', onPeerToggleScreenShare);
       socket.off('peer:toggle-screen-share', onPeerToggleScreenShare);
       socket.off('hand-raise', onPeerHandRaise);
@@ -2551,14 +2598,14 @@ export function useWebGroupCall({
   );
 
   const hostMuteAll = useCallback(() => {
-    broadcast({ type: 'host-mute-all' });
+    broadcast({ type: 'host-mute-all', hostSocketId: socket?.id || currentUser.id });
     socket?.emit('host:mute-all', { roomId: stateRef.current.roomId });
     setCallState((prev) => ({
       ...prev,
       participants: prev.participants.map((p) => ({ ...p, isMuted: true })),
       hostNotification: 'All participants have been muted.',
     }));
-  }, [broadcast, socket]);
+  }, [broadcast, currentUser.id, socket]);
 
   const hostStopScreenShare = useCallback(
     (peerId: string) => {

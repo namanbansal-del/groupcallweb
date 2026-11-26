@@ -3,24 +3,42 @@ import techugoImgUrl from '../assets/techugoImg.jpg';
 
 export type BackgroundMode = 'none' | 'blur-light' | 'blur-heavy' | 'image-techugo' | 'image-custom';
 
+// ── Tuning knobs ────────────────────────────────────────────────────────
+const MASK_W = 256;
+const MASK_H = 144;
+// Mask confidence below EDGE_LOW is 100% background, above EDGE_HIGH is 100% person.
+// Raise both if the old room still leaks through; lower them if hair/shoulders get eaten.
+const EDGE_LOW = 0.45;
+const EDGE_HIGH = 0.72;
+// Weight of the newest mask vs. the previous one (temporal smoothing, reduces flicker).
+const NEW_MASK_WEIGHT = 0.6;
+
+const smoothstep = (a: number, b: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
 export class VirtualBackgroundProcessor {
   private segmenter: SelfieSegmentation | null = null;
   private isModelLoaded = false;
   private videoEl: HTMLVideoElement | null = null;
+
+  // Output canvas. No `willReadFrequently`: that forces CPU rendering and makes
+  // filters + captureStream very slow.
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D | null;
 
-  // Offscreen input canvas to downsample camera frames before feeding MediaPipe.
-  // Model 0 uses 256x256 tensors; feeding a 256x144 canvas reduces CPU/WASM copy by 16x!
   private inputCanvas: HTMLCanvasElement;
   private inputCtx: CanvasRenderingContext2D | null;
 
-  // Offscreen canvas storing the most recent segmentation mask
+  // rawMask: raw model output (read back with getImageData). maskCanvas: cleaned mask.
+  private rawMaskCanvas: HTMLCanvasElement;
+  private rawMaskCtx: CanvasRenderingContext2D | null;
   private maskCanvas: HTMLCanvasElement;
   private maskCtx: CanvasRenderingContext2D | null;
+  private prevMask = new Float32Array(MASK_W * MASK_H);
   private hasValidMask = false;
 
-  // Dedicated offscreen canvas for instantaneous 60fps GPU-assisted blur
   private blurCanvas: HTMLCanvasElement;
   private blurCtx: CanvasRenderingContext2D | null;
 
@@ -30,8 +48,6 @@ export class VirtualBackgroundProcessor {
   private techugoImage: HTMLImageElement | null = null;
   private outputStream: MediaStream | null = null;
   private isProcessing = false;
-
-  // Inference state gating: strictly prevent frame accumulation queuing in MediaPipe C++ graph
   private isInferring = false;
   private lastInferTime = 0;
 
@@ -39,91 +55,80 @@ export class VirtualBackgroundProcessor {
     this.canvas = document.createElement('canvas');
     this.canvas.width = 1280;
     this.canvas.height = 720;
-    this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
+    this.ctx = this.canvas.getContext('2d');
 
-    // 480x270 downscaled canvas for fast model inference with high edge fidelity
     this.inputCanvas = document.createElement('canvas');
     this.inputCanvas.width = 480;
     this.inputCanvas.height = 270;
-    this.inputCtx = this.inputCanvas.getContext('2d', { willReadFrequently: true });
+    this.inputCtx = this.inputCanvas.getContext('2d');
 
-    // 640x360 mask cache for smooth edge interpolation
+    this.rawMaskCanvas = document.createElement('canvas');
+    this.rawMaskCanvas.width = MASK_W;
+    this.rawMaskCanvas.height = MASK_H;
+    this.rawMaskCtx = this.rawMaskCanvas.getContext('2d', { willReadFrequently: true });
+
     this.maskCanvas = document.createElement('canvas');
-    this.maskCanvas.width = 640;
-    this.maskCanvas.height = 360;
+    this.maskCanvas.width = MASK_W;
+    this.maskCanvas.height = MASK_H;
     this.maskCtx = this.maskCanvas.getContext('2d');
 
-    // Offscreen blur canvas
     this.blurCanvas = document.createElement('canvas');
     this.blurCanvas.width = 320;
     this.blurCanvas.height = 180;
     this.blurCtx = this.blurCanvas.getContext('2d');
 
-    // Preload default Techugo background image
     this.techugoImage = new Image();
     this.techugoImage.crossOrigin = 'anonymous';
     this.techugoImage.src = techugoImgUrl || '/assets/techugoImg.jpg';
   }
 
-  private async initModel(): Promise<void> {
-    if (this.segmenter && this.isModelLoaded) return;
-
-    return new Promise((resolve, reject) => {
-      try {
-        const segmenter = new SelfieSegmentation({
-          locateFile: (file) => {
-            return `/mediapipe/selfie_segmentation/${file}`;
-          },
-        });
-
-        // modelSelection: 1 is the high-fidelity landscape model (16:9), optimized for webcam video calls with accurate head/body contours
-        segmenter.setOptions({
-          modelSelection: 1,
-          selfieMode: false,
-        });
-
-        segmenter.onResults((results: Results) => {
-          this.handleResults(results);
-        });
-
-        this.segmenter = segmenter;
-        this.isModelLoaded = true;
-        resolve();
-      } catch (err) {
-        console.warn('[VirtualBackground] Model init failed, trying CDN fallback:', err);
-        try {
-          const fallbackSegmenter = new SelfieSegmentation({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`,
-          });
-          fallbackSegmenter.setOptions({ modelSelection: 1, selfieMode: false });
-          fallbackSegmenter.onResults((results) => this.handleResults(results));
-          this.segmenter = fallbackSegmenter;
-          this.isModelLoaded = true;
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
-      }
-    });
+  private createSegmenter(locate: (file: string) => string): SelfieSegmentation {
+    const s = new SelfieSegmentation({ locateFile: locate });
+    s.setOptions({ modelSelection: 1, selfieMode: false });
+    s.onResults((r: Results) => this.handleResults(r));
+    return s;
   }
 
-  private handleResults(results: Results): void {
-    // Cache latest segmentation mask into offscreen mask canvas
-    if (this.maskCtx && results.segmentationMask) {
-      this.maskCtx.clearRect(0, 0, this.maskCanvas.width, this.maskCanvas.height);
-      this.maskCtx.imageSmoothingEnabled = true;
-      this.maskCtx.imageSmoothingQuality = 'high';
-      this.maskCtx.drawImage(
-        results.segmentationMask,
-        0,
-        0,
-        this.maskCanvas.width,
-        this.maskCanvas.height
+  private async initModel(): Promise<void> {
+    if (this.segmenter && this.isModelLoaded) return;
+    try {
+      this.segmenter = this.createSegmenter((f) => `/mediapipe/selfie_segmentation/${f}`);
+      await this.segmenter.initialize();
+    } catch (err) {
+      console.warn('[VirtualBackground] Local model failed, using CDN:', err);
+      this.segmenter = this.createSegmenter(
+        (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${f}`
       );
+      await this.segmenter.initialize();
+    }
+    this.isModelLoaded = true;
+  }
+
+  /**
+   * The model returns a SOFT mask (confidence 0..1). Using it directly lets the real
+   * room bleed through wherever confidence is ~0.3-0.7 (the pale "halo" around the
+   * body). We sharpen it with a smoothstep and blend with the previous mask.
+   */
+  private handleResults(results: Results): void {
+    const src = results.segmentationMask as CanvasImageSource | undefined;
+    if (src && this.rawMaskCtx && this.maskCtx) {
+      this.rawMaskCtx.clearRect(0, 0, MASK_W, MASK_H);
+      this.rawMaskCtx.drawImage(src, 0, 0, MASK_W, MASK_H);
+      const img = this.rawMaskCtx.getImageData(0, 0, MASK_W, MASK_H);
+      const d = img.data;
+      for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+        // Confidence is carried in alpha. If you ever get NO background replacement
+        // at all, swap `d[i + 3]` for `d[i]` (red channel).
+        const conf = d[i + 3] / 255;
+        const t = this.hasValidMask
+          ? NEW_MASK_WEIGHT * conf + (1 - NEW_MASK_WEIGHT) * this.prevMask[p]
+          : conf;
+        this.prevMask[p] = t;
+        d[i + 3] = Math.round(smoothstep(EDGE_LOW, EDGE_HIGH, t) * 255);
+      }
+      this.maskCtx.putImageData(img, 0, 0);
       this.hasValidMask = true;
     }
-    // Gating release: MediaPipe has finished computing this frame.
-    // Setting isInferring to false here ensures zero frames ever build up in the internal packet queue!
     this.isInferring = false;
   }
 
@@ -149,9 +154,7 @@ export class VirtualBackgroundProcessor {
 
   public async setMode(mode: BackgroundMode, customImageUrl?: string): Promise<void> {
     this.currentMode = mode;
-    if (customImageUrl) {
-      await this.setCustomImage(customImageUrl);
-    }
+    if (customImageUrl) await this.setCustomImage(customImageUrl);
     if (mode !== 'none' && !this.isProcessing && this.videoEl) {
       this.isProcessing = true;
       this.processLoop();
@@ -166,28 +169,24 @@ export class VirtualBackgroundProcessor {
     this.currentMode = mode;
     this.hasValidMask = false;
     this.isInferring = false;
+    this.prevMask.fill(0);
 
-    if (customImageUrl) {
-      await this.setCustomImage(customImageUrl);
-    }
+    if (customImageUrl) await this.setCustomImage(customImageUrl);
 
     if (mode === 'none') {
       this.stop();
       return cameraStream.getVideoTracks()[0] || null;
     }
 
-    // Set up video element to read frames from camera
     if (!this.videoEl) {
       this.videoEl = document.createElement('video');
       this.videoEl.autoplay = true;
       this.videoEl.playsInline = true;
       this.videoEl.muted = true;
     }
-
     this.videoEl.srcObject = cameraStream;
     await this.videoEl.play().catch(() => {});
 
-    // Match canvas dimensions to video (cap to 1280x720 for silky smooth 30fps)
     let width = this.videoEl.videoWidth || 1280;
     let height = this.videoEl.videoHeight || 720;
     if (width > 1280) {
@@ -196,24 +195,21 @@ export class VirtualBackgroundProcessor {
     }
     this.canvas.width = width;
     this.canvas.height = height;
+    // Keep the model input at the camera's real aspect ratio (no squashed faces).
+    this.inputCanvas.height = Math.round((this.inputCanvas.width * height) / width);
 
-    // Immediately blit the camera frame to canvas so captureStream is never black from frame 0
     if (this.ctx && this.videoEl.readyState >= 2) {
       this.ctx.drawImage(this.videoEl, 0, 0, width, height);
     }
 
-    // Start single processing loop if not already running
     if (!this.isProcessing) {
       this.isProcessing = true;
       this.processLoop();
     }
-
-    // Capture processed 30fps track
     if (!this.outputStream) {
       this.outputStream = this.canvas.captureStream(30);
     }
 
-    // Initialize segmentation model in background without blocking stream output
     try {
       await this.initModel();
     } catch (err) {
@@ -227,20 +223,20 @@ export class VirtualBackgroundProcessor {
     this.setMode(mode, customImageUrl);
   }
 
-  /**
-   * Continuous rendering loop running on requestAnimationFrame (30-60 FPS).
-   * Key Architecture:
-   * 1. Decoupled rendering: the user's movements are drawn directly from the live `videoEl`
-   *    on EVERY animation frame, meaning latency is 0ms (instant real-time movement).
-   * 2. Zero-queue inference: MediaPipe is only fed the next frame after the previous one
-   *    completely finishes, preventing internal queue build-up and the multi-second/minute lag.
-   */
+  /** Draw an image so it fills the frame without stretching (like CSS object-fit: cover). */
+  private drawCover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, w: number, h: number) {
+    const iw = img.naturalWidth || img.width;
+    const ih = img.naturalHeight || img.height;
+    if (!iw || !ih) return;
+    const s = Math.max(w / iw, h / ih);
+    const dw = iw * s;
+    const dh = ih * s;
+    ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  }
+
   private processLoop = () => {
     if (!this.isProcessing || !this.videoEl) return;
-
-    if (this.currentMode === 'none') {
-      return;
-    }
+    if (this.currentMode === 'none') return;
 
     const video = this.videoEl;
     const ctx = this.ctx;
@@ -248,107 +244,61 @@ export class VirtualBackgroundProcessor {
 
     if (video.readyState >= 2 && !video.paused && ctx) {
       if (!this.hasValidMask) {
-        // While segmentation mask is loading, display the live camera feed directly (0 latency)
         ctx.drawImage(video, 0, 0, width, height);
       } else {
-        // Full composite render:
         ctx.save();
         ctx.clearRect(0, 0, width, height);
 
-        // Step 1: Draw the full-color, sharp video frame first
+        // 1) Live camera frame (zero latency)
         ctx.drawImage(video, 0, 0, width, height);
 
-        // Step 2: Crop out background using 'destination-in' with soft edge feathering.
-        // 'destination-in' keeps ONLY the real camera video pixels of the person.
-        // The mask's own color is completely discarded, completely eliminating
-        // any white, cyan, or halo artifacts around the silhouette!
+        // 2) Keep only the person: sharpened mask, 1px feather for natural edges
         ctx.globalCompositeOperation = 'destination-in';
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        ctx.filter = 'blur(2px)';
+        ctx.filter = 'blur(1px)';
         ctx.drawImage(this.maskCanvas, 0, 0, width, height);
         ctx.filter = 'none';
 
-        // Step 3: Draw background behind the segmented person
+        // 3) New background behind the person
         ctx.globalCompositeOperation = 'destination-over';
 
-        if (this.currentMode === 'blur-light') {
-          // Instant GPU-assisted downscale-upscale bokeh blur
+        if (this.currentMode === 'blur-light' || this.currentMode === 'blur-heavy') {
           if (this.blurCtx) {
-            this.blurCanvas.width = 320;
-            this.blurCanvas.height = 180;
-            this.blurCtx.filter = 'none';
-            this.blurCtx.drawImage(video, 0, 0, 320, 180);
-            this.blurCtx.filter = 'blur(3px)';
-            this.blurCtx.drawImage(this.blurCanvas, 0, 0, 320, 180);
-
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            ctx.drawImage(this.blurCanvas, 0, 0, width, height);
-          }
-        } else if (this.currentMode === 'blur-heavy') {
-          // Instant heavy bokeh blur
-          if (this.blurCtx) {
-            this.blurCanvas.width = 160;
-            this.blurCanvas.height = 90;
-            this.blurCtx.filter = 'none';
-            this.blurCtx.drawImage(video, 0, 0, 160, 90);
-            this.blurCtx.filter = 'blur(5px)';
-            this.blurCtx.drawImage(this.blurCanvas, 0, 0, 160, 90);
-
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            ctx.drawImage(this.blurCanvas, 0, 0, width, height);
+            this.blurCtx.drawImage(video, 0, 0, this.blurCanvas.width, this.blurCanvas.height);
+            ctx.filter = this.currentMode === 'blur-light' ? 'blur(8px)' : 'blur(20px)';
+            // Oversize slightly so blur doesn't leave transparent borders
+            ctx.drawImage(this.blurCanvas, -24, -24, width + 48, height + 48);
+            ctx.filter = 'none';
           }
         } else if (this.currentMode === 'image-techugo' && this.techugoImage) {
-          // Pre-flip background image so local CSS mirror displays Techugo logo forward ("techugo")
-          ctx.save();
-          ctx.translate(width, 0);
-          ctx.scale(-1, 1);
-          ctx.drawImage(this.techugoImage, 0, 0, width, height);
-          ctx.restore();
+          this.drawCover(ctx, this.techugoImage, width, height);
         } else if (this.currentMode === 'image-custom' && this.customImage) {
-          // Pre-flip custom image so local CSS mirror displays it forward
-          ctx.save();
-          ctx.translate(width, 0);
-          ctx.scale(-1, 1);
-          ctx.drawImage(this.customImage, 0, 0, width, height);
-          ctx.restore();
+          this.drawCover(ctx, this.customImage, width, height);
         } else {
           ctx.fillStyle = '#202124';
           ctx.fillRect(0, 0, width, height);
         }
-
         ctx.restore();
       }
 
-      // ── Dispatch Next Inference (Strictly 1 frame in flight, capped to ~30 FPS) ──
+      // Dispatch next inference: one frame in flight, ~30 FPS max
       const now = performance.now();
+      if (this.isInferring && now - this.lastInferTime > 400) this.isInferring = false;
 
-      // Watchdog: If an inference took longer than 400ms (e.g. dropped frame), unblock gating
-      if (this.isInferring && now - this.lastInferTime > 400) {
-        this.isInferring = false;
-      }
-
-      if (!this.isInferring && this.segmenter && now - this.lastInferTime >= 33) {
+      if (!this.isInferring && this.segmenter && this.isModelLoaded && now - this.lastInferTime >= 33) {
         this.isInferring = true;
         this.lastInferTime = now;
-
-        // Downscale camera frame into 256x144 canvas for fast GPU tensor preparation
         if (this.inputCtx) {
           this.inputCtx.drawImage(video, 0, 0, this.inputCanvas.width, this.inputCanvas.height);
-          this.segmenter
-            .send({ image: this.inputCanvas })
-            .catch(() => {
-              this.isInferring = false;
-            });
+          this.segmenter.send({ image: this.inputCanvas }).catch(() => {
+            this.isInferring = false;
+          });
         }
       }
     }
 
-    if (this.isProcessing) {
-      this.animId = requestAnimationFrame(this.processLoop);
-    }
+    this.animId = requestAnimationFrame(this.processLoop);
   };
 
   public stop(): void {
@@ -377,6 +327,7 @@ export class VirtualBackgroundProcessor {
         this.segmenter.close();
       } catch {}
       this.segmenter = null;
+      this.isModelLoaded = false;
     }
   }
 }
