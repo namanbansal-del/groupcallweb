@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Video, VideoOff, Mic, MicOff, Users, ArrowRight, Dices, Shield, Key } from 'lucide-react';
+import { Video, VideoOff, Mic, MicOff, Users, ArrowRight, Dices, Shield, Key, LogIn, LogOut } from 'lucide-react';
 import type { CallMode } from '../types';
+import { AuthModal, type AuthUser } from './AuthModal';
 
 interface LobbyProps {
   onJoin: (
@@ -38,12 +39,23 @@ export const Lobby: React.FC<LobbyProps> = ({
   onUpdateServerUrl,
   isSocketConnected = false,
 }) => {
+  // Stored Authenticated User
+  const [authenticatedUser, setAuthenticatedUser] = useState<AuthUser | null>(() => {
+    try {
+      const stored = localStorage.getItem('calling_currentUser');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
   // Generate a random room by default (Google Meet style abc-defg-hij)
   const [roomId, setRoomId] = useState(() => {
     if (defaultRoomId) return defaultRoomId;
     return generateMeetCode();
   });
-  const [name, setName] = useState(defaultName);
+  const [name, setName] = useState(() => authenticatedUser?.name || defaultName);
   const mode: CallMode = 'video';
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [cameraEnabled, setCameraEnabled] = useState(true);
@@ -174,6 +186,20 @@ export const Lobby: React.FC<LobbyProps> = ({
     }
   };
 
+  const handleAuthSuccess = (user: AuthUser) => {
+    setAuthenticatedUser(user);
+    setName(user.name);
+    try {
+      localStorage.setItem('groupcall_user_name', user.name);
+    } catch {}
+  };
+
+  const handleSignOut = () => {
+    localStorage.removeItem('calling_authToken');
+    localStorage.removeItem('calling_currentUser');
+    setAuthenticatedUser(null);
+  };
+
   const generateRandomRoom = () => {
     setRoomId(generateMeetCode());
   };
@@ -251,10 +277,40 @@ export const Lobby: React.FC<LobbyProps> = ({
           {/* Right Column: Header & Join Form */}
           <div className="lobby-action-col">
             <div className="lobby-header">
-              <div className="lobby-badge">
-                <Users size={16} color="#2563EB" />
-                <span>GroupCall 50 Web</span>
+              <div className="lobby-header-top-row">
+                <div className="lobby-badge">
+                  <Users size={16} color="#2563EB" />
+                  <span>GroupCall 50 Web</span>
+                </div>
+
+                {/* Account / Sign In Pill */}
+                {authenticatedUser ? (
+                  <div className="lobby-account-pill">
+                    <div className="lobby-account-avatar">
+                      {authenticatedUser.name.slice(0, 1).toUpperCase()}
+                    </div>
+                    <span className="lobby-account-name">{authenticatedUser.name}</span>
+                    <button
+                      type="button"
+                      className="lobby-account-logout"
+                      onClick={handleSignOut}
+                      title="Sign Out"
+                    >
+                      <LogOut size={13} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="lobby-signin-btn"
+                    onClick={() => setShowAuthModal(true)}
+                  >
+                    <LogIn size={14} />
+                    <span>Sign In</span>
+                  </button>
+                )}
               </div>
+
               <h1 className="lobby-title">Enterprise WebRTC Group Calling</h1>
               <p className="lobby-subtitle">
                 HD Video Meetings supporting up to 50 concurrent participants
@@ -421,6 +477,14 @@ export const Lobby: React.FC<LobbyProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Login & Signup Modal */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        serverUrl={serverUrl}
+        onAuthSuccess={handleAuthSuccess}
+      />
     </div>
   );
 };

@@ -40,11 +40,46 @@ const DEFAULT_ICE_SERVERS = [
 const rooms = new Map(); // roomCode -> Map<socketId, { socketId, userId, userName, isMuted, isCameraOff }>
 const socketMeta = new Map(); // socketId -> { roomCode, userId, userName }
 
-const server = http.createServer((req, res) => {
+// In-Memory User Auth Store
+const usersByPhone = new Map(); // phone -> { id, name, phone, password, createdAt }
+const usersById = new Map(); // id -> user
+const tokensMap = new Map(); // token -> user
+
+function generateToken(user) {
+  const payload = {
+    userId: user.id,
+    phone: user.phone,
+    name: user.name,
+    exp: Date.now() + 30 * 24 * 60 * 60 * 1000,
+  };
+  const token = 'jwt_' + Buffer.from(JSON.stringify(payload)).toString('base64url');
+  tokensMap.set(token, user);
+  return token;
+}
+
+function parseRequestBody(req) {
+  return new Promise((resolve) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > 2e6) req.destroy();
+    });
+    req.on('end', () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch {
+        resolve({});
+      }
+    });
+    req.on('error', () => resolve({}));
+  });
+}
+
+const server = http.createServer(async (req, res) => {
   // Enable CORS for REST endpoints
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
@@ -53,6 +88,72 @@ const server = http.createServer((req, res) => {
   }
 
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+
+  // ── AUTH ENDPOINTS ─────────────────────────────────────────────
+  // POST /api/calling/signup
+  if (req.method === 'POST' && url.pathname === '/api/calling/signup') {
+    const data = await parseRequestBody(req);
+    const { name, phone, password } = data;
+    if (!phone) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Phone number or email is required' }));
+      return;
+    }
+    const cleanPhone = String(phone).trim();
+    let user = usersByPhone.get(cleanPhone);
+    if (!user) {
+      user = {
+        id: `user_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        name: (name || cleanPhone).trim(),
+        phone: cleanPhone,
+        password: password || '',
+        createdAt: new Date().toISOString(),
+      };
+      usersByPhone.set(cleanPhone, user);
+      usersById.set(user.id, user);
+    } else {
+      if (name) user.name = name.trim();
+      if (password) user.password = password;
+    }
+    const token = generateToken(user);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      token,
+      user: { id: user.id, name: user.name, phone: user.phone },
+    }));
+    return;
+  }
+
+  // POST /api/calling/login
+  if (req.method === 'POST' && url.pathname === '/api/calling/login') {
+    const data = await parseRequestBody(req);
+    const { phone, password } = data;
+    if (!phone) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Phone number or email is required' }));
+      return;
+    }
+    const cleanPhone = String(phone).trim();
+    let user = usersByPhone.get(cleanPhone);
+    if (!user) {
+      user = {
+        id: `user_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        name: `User ${cleanPhone.slice(-4)}`,
+        phone: cleanPhone,
+        password: password || '',
+        createdAt: new Date().toISOString(),
+      };
+      usersByPhone.set(cleanPhone, user);
+      usersById.set(user.id, user);
+    }
+    const token = generateToken(user);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      token,
+      user: { id: user.id, name: user.name, phone: user.phone },
+    }));
+    return;
+  }
 
   // 1. GET /api/webrtc/config
   if (url.pathname === '/api/webrtc/config') {
