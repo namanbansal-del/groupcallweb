@@ -1,8 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Video, VideoOff, Mic, MicOff, Users, ArrowRight, Dices, Shield, Key } from 'lucide-react';
+import { Video, VideoOff, Mic, MicOff, Users, ArrowRight, Dices, Shield, Key, Phone } from 'lucide-react';
+import { Socket } from 'socket.io-client';
 import type { CallMode } from '../types';
+import { DirectCallingPanel } from './DirectCallingPanel';
 
 interface LobbyProps {
+  socket?: Socket | null;
   onJoin: (
     roomId: string,
     name: string,
@@ -31,6 +34,7 @@ function generateMeetCode(): string {
 }
 
 export const Lobby: React.FC<LobbyProps> = ({
+  socket,
   onJoin,
   defaultName = 'Alex Johnson',
   defaultRoomId,
@@ -38,6 +42,7 @@ export const Lobby: React.FC<LobbyProps> = ({
   onUpdateServerUrl,
   isSocketConnected = false,
 }) => {
+  const [lobbyTab, setLobbyTab] = useState<'room' | 'direct'>('room');
   // Generate a random room by default (Google Meet style abc-defg-hij)
   const [roomId, setRoomId] = useState(() => {
     if (defaultRoomId) return defaultRoomId;
@@ -261,107 +266,135 @@ export const Lobby: React.FC<LobbyProps> = ({
               </p>
             </div>
 
-            {/* Form Inputs */}
-            <form onSubmit={handleSubmit} className="lobby-form">
-              <div className="form-group">
-                <label className="form-label" htmlFor="userNameInput">
-                  Your Name
-                </label>
-                <input
-                  id="userNameInput"
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. Alex Johnson"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <label className="form-label" htmlFor="roomIdInput" style={{ margin: 0 }}>
-                    Meeting Room ID
-                  </label>
-                  <button
-                    type="button"
-                    onClick={generateRandomRoom}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--primary)',
-                      fontSize: '12px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      padding: 0,
-                    }}
-                  >
-                    <Dices size={14} />
-                    <span>New Clean Room</span>
-                  </button>
-                </div>
-                <input
-                  id="roomIdInput"
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. ROOM-5821 or TEST-ROOM"
-                  value={roomId}
-                  onChange={(e) => setRoomId(e.target.value.toUpperCase())}
-                  required
-                />
-                {roomId === 'TEST-ROOM' && (
-                  <span style={{ fontSize: '11px', color: '#D97706', marginTop: '4px', display: 'block' }}>
-                    Note: TEST-ROOM is a shared public test room with existing participants. Click "New Clean Room" for a private meeting.
-                  </span>
-                )}
-              </div>
-
-              {/* Host / Admin Login Section */}
-              <div className="host-login-box">
-                <label className="host-toggle-label">
-                  <input
-                    type="checkbox"
-                    checked={joinAsHost}
-                    onChange={(e) => setJoinAsHost(e.target.checked)}
-                    className="host-checkbox"
-                  />
-                  <div className="host-toggle-content">
-                    <div className="host-toggle-title">
-                      <Shield size={16} color="#2563EB" />
-                      <span>Join as Meeting Host / Admin</span>
-                    </div>
-                    <span className="host-toggle-desc">
-                      Full control: mute anyone, lock screen sharing, and manage meeting permissions
-                    </span>
-                  </div>
-                </label>
-
-                {joinAsHost && (
-                  <div className="host-key-wrap">
-                    <div className="host-key-input-row">
-                      <Key size={14} color="#64748B" />
-                      <input
-                        type="password"
-                        className="host-key-input"
-                        placeholder="Admin Host Passcode (default: admin123)"
-                        value={hostKey}
-                        onChange={(e) => setHostKey(e.target.value)}
-                      />
-                    </div>
-                    <span className="host-key-hint">Default passcode: <code>admin123</code></span>
-                  </div>
-                )}
-              </div>
-
-              {/* Join Call Button */}
-              <button type="submit" className="join-submit-btn">
-                <span>{joinAsHost ? 'Join as Meeting Host 👑' : 'Join Video Meeting'}</span>
-                <ArrowRight size={18} />
+            {/* Mode Switcher: Room Video Meeting vs 1-to-1 Phone Call & Auth */}
+            <div className="lobby-tab-switcher">
+              <button
+                type="button"
+                className={`lobby-tab-btn ${lobbyTab === 'room' ? 'tab-active' : ''}`}
+                onClick={() => setLobbyTab('room')}
+              >
+                <Video size={16} />
+                <span>Group Meeting</span>
               </button>
-            </form>
+              <button
+                type="button"
+                className={`lobby-tab-btn ${lobbyTab === 'direct' ? 'tab-active' : ''}`}
+                onClick={() => setLobbyTab('direct')}
+              >
+                <Phone size={16} />
+                <span>1-to-1 Phone Call & Auth</span>
+              </button>
+            </div>
+
+            {lobbyTab === 'direct' ? (
+              <DirectCallingPanel
+                socket={socket || null}
+                serverUrl={serverUrl}
+                isSocketConnected={isSocketConnected}
+              />
+            ) : (
+              /* Form Inputs */
+              <form onSubmit={handleSubmit} className="lobby-form">
+                <div className="form-group">
+                  <label className="form-label" htmlFor="userNameInput">
+                    Your Name
+                  </label>
+                  <input
+                    id="userNameInput"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Alex Johnson"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label className="form-label" htmlFor="roomIdInput" style={{ margin: 0 }}>
+                      Meeting Room ID
+                    </label>
+                    <button
+                      type="button"
+                      onClick={generateRandomRoom}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--primary)',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: 0,
+                      }}
+                    >
+                      <Dices size={14} />
+                      <span>New Clean Room</span>
+                    </button>
+                  </div>
+                  <input
+                    id="roomIdInput"
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. ROOM-5821 or TEST-ROOM"
+                    value={roomId}
+                    onChange={(e) => setRoomId(e.target.value.toUpperCase())}
+                    required
+                  />
+                  {roomId === 'TEST-ROOM' && (
+                    <span style={{ fontSize: '11px', color: '#D97706', marginTop: '4px', display: 'block' }}>
+                      Note: TEST-ROOM is a shared public test room with existing participants. Click "New Clean Room" for a private meeting.
+                    </span>
+                  )}
+                </div>
+
+                {/* Host / Admin Login Section */}
+                <div className="host-login-box">
+                  <label className="host-toggle-label">
+                    <input
+                      type="checkbox"
+                      checked={joinAsHost}
+                      onChange={(e) => setJoinAsHost(e.target.checked)}
+                      className="host-checkbox"
+                    />
+                    <div className="host-toggle-content">
+                      <div className="host-toggle-title">
+                        <Shield size={16} color="#2563EB" />
+                        <span>Join as Meeting Host / Admin</span>
+                      </div>
+                      <span className="host-toggle-desc">
+                        Full control: mute anyone, lock screen sharing, and manage meeting permissions
+                      </span>
+                    </div>
+                  </label>
+
+                  {joinAsHost && (
+                    <div className="host-key-wrap">
+                      <div className="host-key-input-row">
+                        <Key size={14} color="#64748B" />
+                        <input
+                          type="password"
+                          className="host-key-input"
+                          placeholder="Admin Host Passcode (default: admin123)"
+                          value={hostKey}
+                          onChange={(e) => setHostKey(e.target.value)}
+                        />
+                      </div>
+                      <span className="host-key-hint">Default passcode: <code>admin123</code></span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Join Call Button */}
+                <button type="submit" className="join-submit-btn">
+                  <span>{joinAsHost ? 'Join as Meeting Host 👑' : 'Join Video Meeting'}</span>
+                  <ArrowRight size={18} />
+                </button>
+              </form>
+            )}
 
             {/* Server Connection Status Bar */}
             <div className="server-config-section">
