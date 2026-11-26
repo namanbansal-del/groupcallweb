@@ -99,6 +99,10 @@ export function useWebGroupCall({
   const timerRef = useRef<number | null>(null);
   const stateRef = useRef(callState);
   stateRef.current = callState;
+  const toggleScreenShareRef = useRef<() => void>(() => {});
+  const leaveGroupCallRef = useRef<() => void>(() => {});
+  const iceRestartAttemptsRef = useRef<Map<string, number>>(new Map());
+  const MAX_ICE_RESTART_ATTEMPTS = 3;
 
   // ── ICE Candidate Buffer to prevent race conditions ─────────────
   const queueCandidate = useCallback((peerId: string, candidate: RTCIceCandidateInit) => {
@@ -757,7 +761,17 @@ export function useWebGroupCall({
         const iceState = pc.iceConnectionState;
         console.log(`[Web Mesh] ICE state for ${remoteSocketId}: ${iceState}`);
         if (iceState === 'failed' || iceState === 'disconnected') {
-          console.warn(`[Web Mesh] ICE ${iceState} with ${remoteSocketId}. Triggering restartIce...`);
+          const attempts = (iceRestartAttemptsRef.current.get(remoteSocketId) || 0) + 1;
+          iceRestartAttemptsRef.current.set(remoteSocketId, attempts);
+          if (attempts > MAX_ICE_RESTART_ATTEMPTS) {
+            console.warn(`[Web Mesh] ICE restart limit reached for ${remoteSocketId}, stopping retries`);
+            setCallState((prev) => ({
+              ...prev,
+              error: 'Connection to a participant was lost. Please refresh to reconnect.',
+            }));
+            return;
+          }
+          console.warn(`[Web Mesh] ICE ${iceState} with ${remoteSocketId}. Triggering restartIce (attempt ${attempts})...`);
           try {
             if (typeof pc.restartIce === 'function') {
               pc.restartIce();
@@ -778,6 +792,9 @@ export function useWebGroupCall({
           } catch (e) {
             console.warn('[Web Mesh] restartIce error:', e);
           }
+        }
+        if (iceState === 'connected') {
+          iceRestartAttemptsRef.current.delete(remoteSocketId);
         }
       };
 
@@ -1373,6 +1390,7 @@ export function useWebGroupCall({
     peersRef.current.clear();
     peerStreamsRef.current.clear();
     peerScreenStreamsRef.current.clear();
+    iceRestartAttemptsRef.current.clear();
 
     if (vbProcessorRef.current) {
       vbProcessorRef.current.destroy();
@@ -1866,6 +1884,92 @@ export function useWebGroupCall({
     }
   }, [currentUser.id, socket]);
 
+  // ── Host control socket listeners (useCallback so they are stable for the socket effect deps) ──
+  const onHostMuteUser = useCallback(
+    (payload: any = {}) => {
+      const targetId = payload.socketId || payload.userId || payload.targetId || payload.id;
+      if (!targetId) return;
+      setCallState((prev) => ({
+        ...prev,
+        participants: prev.participants.map((p) =>
+          p.id === targetId || p.socketId === targetId || p.userId === targetId
+            ? { ...p, isMuted: true }
+            : p
+        ),
+      }));
+      if (targetId === currentUser.id || targetId === socket?.id) {
+        localStreamRef.current?.getAudioTracks().forEach((t) => {
+          t.enabled = false;
+        });
+        setCallState((prev) => ({
+          ...prev,
+          isMuted: true,
+          localParticipant: { ...prev.localParticipant, isMuted: true },
+          hostNotification: 'You were muted by the meeting host.',
+        }));
+      }
+    },
+    [currentUser.id, socket]
+  );
+
+  const onHostMuteAll = useCallback(() => {
+    setCallState((prev) => ({
+      ...prev,
+      participants: prev.participants.map((p) => ({ ...p, isMuted: true })),
+      hostNotification: 'All participants have been muted.',
+    }));
+    if (currentUser.id) {
+      localStreamRef.current?.getAudioTracks().forEach((t) => {
+        t.enabled = false;
+      });
+      setCallState((prev) => ({
+        ...prev,
+        isMuted: true,
+        localParticipant: { ...prev.localParticipant, isMuted: true },
+      }));
+    }
+  }, [currentUser.id]);
+
+  const onHostStopScreenShare = useCallback(
+    (payload: any = {}) => {
+      const targetId = payload.socketId || payload.userId || payload.targetId || payload.id;
+      if (!targetId) return;
+      const isMe = targetId === currentUser.id || targetId === socket?.id;
+      if (isMe && stateRef.current.isScreenSharing) {
+        toggleScreenShareRef.current();
+      }
+      setCallState((prev) => ({
+        ...prev,
+        participants: prev.participants.map((p) =>
+          p.id === targetId || p.socketId === targetId || p.userId === targetId
+            ? { ...p, isScreenSharing: false, screenStream: null }
+            : p
+        ),
+      }));
+    },
+    [currentUser.id, socket]
+  );
+
+  const onHostRemove = useCallback(() => {
+    if (stateRef.current.status === 'idle') return;
+    leaveGroupCallRef.current();
+    alert('You were removed from the meeting by the host.');
+  }, []);
+
+  const onHostSettingsUpdate = useCallback(
+    (payload: any = {}) => {
+      if (!payload?.settings) return;
+      setCallState((prev) => ({
+        ...prev,
+        hostSettings: payload.settings,
+      }));
+      if (!payload.settings.allowScreenShare && stateRef.current.isScreenSharing && !stateRef.current.isHost) {
+        toggleScreenShareRef.current();
+      }
+    },
+    []
+  );
+
   // ── Socket Room Listeners (Frontend Integration Guide Compliant) ─
   useEffect(() => {
     if (!socket) return;
@@ -2047,14 +2151,39 @@ export function useWebGroupCall({
       const peerId = payload.socketId || payload.userId || payload.id;
       if (!peerId) return;
 
+      // Close WebRTC peer connection
       for (const [key, pc] of peersRef.current.entries()) {
         if (key === peerId || key === payload.socketId || key === payload.userId) {
           pc.close();
           peersRef.current.delete(key);
           peerStreamsRef.current.delete(key);
+          peerScreenStreamsRef.current.delete(key);
         }
       }
       dataChannelsRef.current.delete(peerId);
+
+      // Clean up Web Audio analyser for this peer (prevents ghost audio detection & memory leak)
+      const oldAnalyser = remoteAnalysersRef.current.get(peerId);
+      if (oldAnalyser) {
+        try {
+          oldAnalyser.source.disconnect();
+        } catch {}
+        remoteAnalysersRef.current.delete(peerId);
+      }
+      // Also try socketId key
+      const oldAnalyserBySocket = remoteAnalysersRef.current.get(payload.socketId);
+      if (oldAnalyserBySocket && oldAnalyserBySocket !== oldAnalyser) {
+        try {
+          oldAnalyserBySocket.source.disconnect();
+        } catch {}
+        remoteAnalysersRef.current.delete(payload.socketId);
+      }
+
+      // Clear buffered ICE candidates for this peer (prevents unbounded memory growth)
+      pendingCandidatesRef.current.delete(peerId);
+      if (payload.socketId) pendingCandidatesRef.current.delete(payload.socketId);
+      iceRestartAttemptsRef.current.delete(peerId);
+      if (payload.socketId) iceRestartAttemptsRef.current.delete(payload.socketId);
 
       setCallState((prev) => ({
         ...prev,
@@ -2183,9 +2312,19 @@ export function useWebGroupCall({
     socket.on('user-disconnected', onUserDisconnected);
     socket.on('toggle-audio', onPeerToggleAudio);
     socket.on('toggle-video', onPeerToggleVideo);
+    socket.on('peer:toggle-audio', onPeerToggleAudio);
+    socket.on('peer:toggle-video', onPeerToggleVideo);
     socket.on('toggle-screen-share', onPeerToggleScreenShare);
+    socket.on('peer:toggle-screen-share', onPeerToggleScreenShare);
     socket.on('hand-raise', onPeerHandRaise);
     socket.on('change-name', onPeerNameChange);
+    // Host control events from signaling server
+    socket.on('host:mute-user', onHostMuteUser);
+    socket.on('host:mute-all', onHostMuteAll);
+    socket.on('host:stop-screenshare', onHostStopScreenShare);
+    socket.on('host-remove', onHostRemove);
+    socket.on('peer:host-settings', onHostSettingsUpdate);
+    socket.on('host:settings-update', onHostSettingsUpdate);
 
     return () => {
       socket.off('all-users', onAllUsers);
@@ -2196,11 +2335,32 @@ export function useWebGroupCall({
       socket.off('user-disconnected', onUserDisconnected);
       socket.off('toggle-audio', onPeerToggleAudio);
       socket.off('toggle-video', onPeerToggleVideo);
+      socket.off('peer:toggle-audio', onPeerToggleAudio);
+      socket.off('peer:toggle-video', onPeerToggleVideo);
       socket.off('toggle-screen-share', onPeerToggleScreenShare);
+      socket.off('peer:toggle-screen-share', onPeerToggleScreenShare);
       socket.off('hand-raise', onPeerHandRaise);
       socket.off('change-name', onPeerNameChange);
+      socket.off('host:mute-user', onHostMuteUser);
+      socket.off('host:mute-all', onHostMuteAll);
+      socket.off('host:stop-screenshare', onHostStopScreenShare);
+      socket.off('host-remove', onHostRemove);
+      socket.off('peer:host-settings', onHostSettingsUpdate);
+      socket.off('host:settings-update', onHostSettingsUpdate);
     };
-  }, [createPeer, currentUser.id, drainPendingCandidates, queueCandidate, socket, upsertParticipant]);
+  }, [
+    createPeer,
+    currentUser.id,
+    drainPendingCandidates,
+    queueCandidate,
+    socket,
+    upsertParticipant,
+    onHostMuteUser,
+    onHostMuteAll,
+    onHostStopScreenShare,
+    onHostRemove,
+    onHostSettingsUpdate,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -2334,6 +2494,10 @@ export function useWebGroupCall({
   const clearHostNotification = useCallback(() => {
     setCallState((prev) => ({ ...prev, hostNotification: null }));
   }, []);
+
+  // Keep refs to late-defined callbacks so socket listeners can call them safely
+  toggleScreenShareRef.current = toggleScreenShare;
+  leaveGroupCallRef.current = leaveGroupCall;
 
   return {
     callState,
