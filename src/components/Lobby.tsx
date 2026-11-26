@@ -166,13 +166,60 @@ export const Lobby: React.FC<LobbyProps> = ({
     }
   }, [previewStream, cameraEnabled]);
 
-  const togglePreviewCam = () => {
+  const togglePreviewCam = async () => {
     const nextState = !cameraEnabled;
     setCameraEnabled(nextState);
-    if (previewStreamRef.current) {
-      previewStreamRef.current.getVideoTracks().forEach((t) => {
-        t.enabled = nextState;
+
+    if (!nextState) {
+      // User turned camera OFF: Stop all video tracks to completely release hardware camera sensor and turn off green LED
+      if (previewStreamRef.current) {
+        previewStreamRef.current.getVideoTracks().forEach((t) => {
+          t.stop();
+          previewStreamRef.current?.removeTrack(t);
+        });
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+      setPreviewStream((prev) => {
+        if (!prev) return null;
+        return new MediaStream(prev.getAudioTracks());
       });
+    } else {
+      // User turned camera ON: Re-acquire camera stream and turn green LED on
+      try {
+        let videoStream: MediaStream;
+        try {
+          videoStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: 'user',
+              width: { ideal: 1280, min: 640 },
+              height: { ideal: 720, min: 360 },
+              aspectRatio: { ideal: 1.7777777778 },
+            },
+          });
+        } catch {
+          videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        }
+
+        const newVideoTrack = videoStream.getVideoTracks()[0];
+        if (newVideoTrack) {
+          if (!previewStreamRef.current) {
+            previewStreamRef.current = new MediaStream([newVideoTrack]);
+          } else {
+            previewStreamRef.current.addTrack(newVideoTrack);
+          }
+          const updatedStream = new MediaStream(previewStreamRef.current.getTracks());
+          setPreviewStream(updatedStream);
+          if (videoRef.current) {
+            videoRef.current.srcObject = updatedStream;
+            videoRef.current.play().catch(() => {});
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to re-enable camera:', err);
+        setCameraEnabled(false);
+      }
     }
   };
 
@@ -208,8 +255,15 @@ export const Lobby: React.FC<LobbyProps> = ({
     e.preventDefault();
     if (!roomId.trim() || !name.trim()) return;
 
-    // Preserve active working camera stream for the call (prevents NotReadableError on mobile iOS/Android)
-    const stream = previewStreamRef.current;
+    let stream = previewStreamRef.current;
+    if (!cameraEnabled && stream) {
+      // Ensure all video tracks are stopped so the green camera light is off if joining with camera disabled
+      stream.getVideoTracks().forEach((t) => {
+        t.stop();
+        stream?.removeTrack(t);
+      });
+    }
+
     previewStreamRef.current = null;
     setPreviewStream(null);
 
