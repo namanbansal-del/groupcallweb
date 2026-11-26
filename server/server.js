@@ -31,9 +31,20 @@ const PORT = process.env.PORT || 4000;
 const STATIC_ROOM_CODE = process.env.STATIC_ROOM_CODE || 'TEST-ROOM';
 
 const DEFAULT_ICE_SERVERS = [
-  { urls: ['stun:stun.l.google.com:19302'] },
-  { urls: ['stun:stun1.l.google.com:19302'] },
-  { urls: ['stun:stun2.l.google.com:19302'] },
+  {
+    urls: [
+      'stun:13.126.239.227:3478',
+      'stun:stun.l.google.com:19302',
+    ],
+  },
+  {
+    urls: [
+      'turn:13.126.239.227:3478?transport=udp',
+      'turn:13.126.239.227:3478?transport=tcp',
+    ],
+    username: 'turnuser',
+    credential: 'techugo@123',
+  },
 ];
 
 // Room & Socket State
@@ -55,6 +66,32 @@ function generateToken(user) {
   const token = 'jwt_' + Buffer.from(JSON.stringify(payload)).toString('base64url');
   tokensMap.set(token, user);
   return token;
+}
+
+function resolveUserFromToken(token) {
+  if (!token) return null;
+  if (tokensMap.has(token)) return tokensMap.get(token);
+  try {
+    if (token.startsWith('jwt_')) {
+      const json = JSON.parse(Buffer.from(token.slice(4), 'base64url').toString('utf8'));
+      if (json && json.phone) {
+        let user = usersByPhone.get(json.phone);
+        if (!user) {
+          user = {
+            id: json.userId || `user_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            name: json.name || json.phone,
+            phone: json.phone,
+            createdAt: new Date().toISOString(),
+          };
+          usersByPhone.set(json.phone, user);
+          usersById.set(user.id, user);
+        }
+        tokensMap.set(token, user);
+        return user;
+      }
+    }
+  } catch {}
+  return null;
 }
 
 function parseRequestBody(req) {
@@ -116,10 +153,12 @@ const server = http.createServer(async (req, res) => {
       if (password) user.password = password;
     }
     const token = generateToken(user);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      token,
+      success: true,
+      message: 'Signup successful',
       user: { id: user.id, name: user.name, phone: user.phone },
+      token,
     }));
     return;
   }
@@ -149,8 +188,10 @@ const server = http.createServer(async (req, res) => {
     const token = generateToken(user);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      token,
+      success: true,
+      message: 'Login successful',
       user: { id: user.id, name: user.name, phone: user.phone },
+      token,
     }));
     return;
   }
@@ -234,14 +275,26 @@ const io = new Server(server, {
 });
 
 function registerSocketHandlers(namespace) {
+  // Support auth handshake token verification
+  namespace.use((socket, next) => {
+    const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+    if (token) {
+      const user = resolveUserFromToken(token);
+      if (user) {
+        socket.user = user;
+      }
+    }
+    next();
+  });
+
   namespace.on('connection', (socket) => {
     console.log(`[Socket Connected] ${socket.id} in namespace ${namespace.name}`);
 
     // ── 1. JOIN ROOM ───────────────────────────────────────────────
     const handleJoin = (payload = {}, ackCallback) => {
       const roomCode = (payload.roomCode || payload.roomId || STATIC_ROOM_CODE).trim().toUpperCase();
-      const userName = payload.userName || payload.user?.name || `User_${socket.id.slice(0, 4)}`;
-      const userId = payload.userId || payload.user?.id || `user_${socket.id.slice(0, 6)}`;
+      const userName = payload.userName || payload.user?.name || socket.user?.name || `User_${socket.id.slice(0, 4)}`;
+      const userId = payload.userId || payload.user?.id || socket.user?.id || `user_${socket.id.slice(0, 6)}`;
 
       socket.join(roomCode);
 
@@ -304,7 +357,7 @@ function registerSocketHandlers(namespace) {
       console.log(`[Join Room] ${userName} (${socket.id}) in '${roomCode}'. Total: ${room.size}`);
 
       if (typeof ackCallback === 'function') {
-        ackCallback({ roomCode, totalUsers: room.size });
+        ackCallback({ ok: true, roomCode, totalUsers: room.size });
       }
     };
 

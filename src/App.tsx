@@ -44,7 +44,16 @@ export function App() {
 
   // Manage socket connection cleanly with full lifecycle disconnect on cleanup
   useEffect(() => {
-    const s = io(serverUrl, {
+    let savedAuthToken: string | null = null;
+    try {
+      savedAuthToken = localStorage.getItem('calling_authToken');
+    } catch {}
+
+    const socketEndpoint = serverUrl.endsWith('/call') ? serverUrl : `${serverUrl}/call`;
+    const s = io(socketEndpoint, {
+      auth: {
+        token: savedAuthToken,
+      },
       autoConnect: true,
       transports: ['websocket', 'polling'],
       reconnectionAttempts: 15,

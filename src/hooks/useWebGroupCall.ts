@@ -782,6 +782,7 @@ export function useWebGroupCall({
                 .then(() => {
                   if (pc.localDescription) {
                     socket?.emit('offer', {
+                      targetId: remoteSocketId,
                       to: remoteSocketId,
                       offer: { type: pc.localDescription.type, sdp: pc.localDescription.sdp },
                     });
@@ -803,6 +804,7 @@ export function useWebGroupCall({
         if (event.candidate && socket?.connected) {
           const candidateData = event.candidate.toJSON();
           socket.emit('ice-candidate', {
+            targetId: remoteSocketId,
             to: remoteSocketId,
             candidate: candidateData,
           });
@@ -998,6 +1000,7 @@ export function useWebGroupCall({
 
           const offerData = { type: offer.type, sdp: offer.sdp };
           socket?.emit('offer', {
+            targetId: remoteSocketId,
             to: remoteSocketId,
             offer: offerData,
           });
@@ -2091,6 +2094,7 @@ export function useWebGroupCall({
 
         const answerData = { type: answer.type, sdp: answer.sdp };
         socket.emit('answer', {
+          targetId: peerId,
           to: peerId,
           answer: answerData,
         });
@@ -2310,6 +2314,7 @@ export function useWebGroupCall({
     socket.on('answer', onAnswer);
     socket.on('ice-candidate', onIceCandidate);
     socket.on('user-disconnected', onUserDisconnected);
+    socket.on('user-left', onUserDisconnected);
     socket.on('toggle-audio', onPeerToggleAudio);
     socket.on('toggle-video', onPeerToggleVideo);
     socket.on('peer:toggle-audio', onPeerToggleAudio);
@@ -2333,6 +2338,7 @@ export function useWebGroupCall({
       socket.off('answer', onAnswer);
       socket.off('ice-candidate', onIceCandidate);
       socket.off('user-disconnected', onUserDisconnected);
+      socket.off('user-left', onUserDisconnected);
       socket.off('toggle-audio', onPeerToggleAudio);
       socket.off('toggle-video', onPeerToggleVideo);
       socket.off('peer:toggle-audio', onPeerToggleAudio);
