@@ -1661,10 +1661,10 @@ export function useWebGroupCall({
         return;
       }
 
-      // Ensure raw camera track is stored
+      // Ensure raw camera track is stored (never capture an already processed canvas track)
       if (!rawCameraTrackRef.current || rawCameraTrackRef.current.readyState === 'ended') {
         const vTrack = localStreamRef.current.getVideoTracks()[0];
-        if (vTrack) {
+        if (vTrack && !vbProcessorRef.current?.isStarted()) {
           rawCameraTrackRef.current = vTrack;
         }
       }

@@ -41,22 +41,22 @@ export class VirtualBackgroundProcessor {
     this.canvas.height = 720;
     this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
 
-    // 256x144 downscaled canvas for fast model inference (15ms vs 150ms)
+    // 480x270 downscaled canvas for fast model inference with high edge fidelity
     this.inputCanvas = document.createElement('canvas');
-    this.inputCanvas.width = 256;
-    this.inputCanvas.height = 144;
-    this.inputCtx = this.inputCanvas.getContext('2d');
+    this.inputCanvas.width = 480;
+    this.inputCanvas.height = 270;
+    this.inputCtx = this.inputCanvas.getContext('2d', { willReadFrequently: true });
 
-    // 256x144 mask cache
+    // 640x360 mask cache for smooth edge interpolation
     this.maskCanvas = document.createElement('canvas');
-    this.maskCanvas.width = 256;
-    this.maskCanvas.height = 144;
+    this.maskCanvas.width = 640;
+    this.maskCanvas.height = 360;
     this.maskCtx = this.maskCanvas.getContext('2d');
 
     // Offscreen blur canvas
     this.blurCanvas = document.createElement('canvas');
-    this.blurCanvas.width = 160;
-    this.blurCanvas.height = 90;
+    this.blurCanvas.width = 320;
+    this.blurCanvas.height = 180;
     this.blurCtx = this.blurCanvas.getContext('2d');
 
     // Preload default Techugo background image
@@ -76,9 +76,9 @@ export class VirtualBackgroundProcessor {
           },
         });
 
-        // modelSelection: 0 is the fast general model (256x256), optimized for real-time video calls with near-zero latency
+        // modelSelection: 1 is the high-fidelity landscape model (16:9), optimized for webcam video calls with accurate head/body contours
         segmenter.setOptions({
-          modelSelection: 0,
+          modelSelection: 1,
           selfieMode: false,
         });
 
@@ -95,7 +95,7 @@ export class VirtualBackgroundProcessor {
           const fallbackSegmenter = new SelfieSegmentation({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`,
           });
-          fallbackSegmenter.setOptions({ modelSelection: 0, selfieMode: false });
+          fallbackSegmenter.setOptions({ modelSelection: 1, selfieMode: false });
           fallbackSegmenter.onResults((results) => this.handleResults(results));
           this.segmenter = fallbackSegmenter;
           this.isModelLoaded = true;
@@ -110,6 +110,9 @@ export class VirtualBackgroundProcessor {
   private handleResults(results: Results): void {
     // Cache latest segmentation mask into offscreen mask canvas
     if (this.maskCtx && results.segmentationMask) {
+      this.maskCtx.clearRect(0, 0, this.maskCanvas.width, this.maskCanvas.height);
+      this.maskCtx.imageSmoothingEnabled = true;
+      this.maskCtx.imageSmoothingQuality = 'high';
       this.maskCtx.drawImage(
         results.segmentationMask,
         0,
@@ -252,46 +255,49 @@ export class VirtualBackgroundProcessor {
         ctx.save();
         ctx.clearRect(0, 0, width, height);
 
-        // Step 1: Draw the latest segmentation mask scaled up to full canvas
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'medium';
-        ctx.drawImage(this.maskCanvas, 0, 0, width, height);
-
-        // Step 2: Composite the LIVE CURRENT camera frame onto the mask.
-        // Because `video` is the live camera feed, every movement and word is rendered
-        // at the full camera refresh rate with zero lag!
-        ctx.globalCompositeOperation = 'source-in';
+        // Step 1: Draw the full-color, sharp video frame first
         ctx.drawImage(video, 0, 0, width, height);
+
+        // Step 2: Crop out background using 'destination-in' with soft edge feathering.
+        // 'destination-in' keeps ONLY the real camera video pixels of the person.
+        // The mask's own color is completely discarded, completely eliminating
+        // any white, cyan, or halo artifacts around the silhouette!
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.filter = 'blur(2px)';
+        ctx.drawImage(this.maskCanvas, 0, 0, width, height);
+        ctx.filter = 'none';
 
         // Step 3: Draw background behind the segmented person
         ctx.globalCompositeOperation = 'destination-over';
 
         if (this.currentMode === 'blur-light') {
-          // Instant 0.1ms GPU-assisted downscale-upscale bokeh blur
+          // Instant GPU-assisted downscale-upscale bokeh blur
           if (this.blurCtx) {
-            this.blurCanvas.width = 160;
-            this.blurCanvas.height = 90;
+            this.blurCanvas.width = 320;
+            this.blurCanvas.height = 180;
             this.blurCtx.filter = 'none';
-            this.blurCtx.drawImage(video, 0, 0, 160, 90);
-            this.blurCtx.filter = 'blur(1.5px)';
-            this.blurCtx.drawImage(this.blurCanvas, 0, 0, 160, 90);
+            this.blurCtx.drawImage(video, 0, 0, 320, 180);
+            this.blurCtx.filter = 'blur(3px)';
+            this.blurCtx.drawImage(this.blurCanvas, 0, 0, 320, 180);
 
             ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'medium';
+            ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(this.blurCanvas, 0, 0, width, height);
           }
         } else if (this.currentMode === 'blur-heavy') {
           // Instant heavy bokeh blur
           if (this.blurCtx) {
-            this.blurCanvas.width = 80;
-            this.blurCanvas.height = 45;
+            this.blurCanvas.width = 160;
+            this.blurCanvas.height = 90;
             this.blurCtx.filter = 'none';
-            this.blurCtx.drawImage(video, 0, 0, 80, 45);
-            this.blurCtx.filter = 'blur(2.5px)';
-            this.blurCtx.drawImage(this.blurCanvas, 0, 0, 80, 45);
+            this.blurCtx.drawImage(video, 0, 0, 160, 90);
+            this.blurCtx.filter = 'blur(5px)';
+            this.blurCtx.drawImage(this.blurCanvas, 0, 0, 160, 90);
 
             ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'medium';
+            ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(this.blurCanvas, 0, 0, width, height);
           }
         } else if (this.currentMode === 'image-techugo' && this.techugoImage) {
