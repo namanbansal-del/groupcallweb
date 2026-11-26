@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Video, VideoOff, Mic, MicOff, Users, ArrowRight, Dices, Shield, Key, LogIn, LogOut } from 'lucide-react';
+import { Video, VideoOff, Mic, MicOff, Users, ArrowRight, Dices, Shield, Key, LogIn, LogOut, Lock } from 'lucide-react';
 import type { CallMode } from '../types';
 import { AuthModal, type AuthUser } from './AuthModal';
 
@@ -39,7 +39,7 @@ export const Lobby: React.FC<LobbyProps> = ({
   onUpdateServerUrl,
   isSocketConnected = false,
 }) => {
-  // Stored Authenticated User
+  // Stored Authenticated User (Required to Join Meeting)
   const [authenticatedUser, setAuthenticatedUser] = useState<AuthUser | null>(() => {
     try {
       const stored = localStorage.getItem('calling_currentUser');
@@ -48,7 +48,14 @@ export const Lobby: React.FC<LobbyProps> = ({
       return null;
     }
   });
-  const [showAuthModal, setShowAuthModal] = useState(false);
+  // Auto-open auth modal if user is not yet logged in
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(() => {
+    try {
+      return !localStorage.getItem('calling_currentUser');
+    } catch {
+      return true;
+    }
+  });
 
   // Generate a random room by default (Google Meet style abc-defg-hij)
   const [roomId, setRoomId] = useState(() => {
@@ -253,6 +260,10 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!authenticatedUser) {
+      setShowAuthModal(true);
+      return;
+    }
     if (!roomId.trim() || !name.trim()) return;
 
     let stream = previewStreamRef.current;
@@ -466,11 +477,36 @@ export const Lobby: React.FC<LobbyProps> = ({
                 )}
               </div>
 
-              {/* Join Call Button */}
-              <button type="submit" className="join-submit-btn">
-                <span>{joinAsHost ? 'Join as Meeting Host 👑' : 'Join Video Meeting'}</span>
-                <ArrowRight size={18} />
-              </button>
+              {/* Mandatory Auth Gate Banner if not signed in */}
+              {!authenticatedUser && (
+                <div className="auth-required-gate-box" onClick={() => setShowAuthModal(true)}>
+                  <div className="auth-gate-icon-circle">
+                    <Lock size={15} color="#2563EB" />
+                  </div>
+                  <div className="auth-gate-text">
+                    <strong>Account Required</strong>
+                    <span>Sign in or register an account to enter video calls</span>
+                  </div>
+                  <button type="button" className="auth-gate-pill-btn">Sign In</button>
+                </div>
+              )}
+
+              {/* Join Call Button (Requires Auth) */}
+              {authenticatedUser ? (
+                <button type="submit" className="join-submit-btn">
+                  <span>{joinAsHost ? 'Join as Meeting Host 👑' : 'Join Video Meeting'}</span>
+                  <ArrowRight size={18} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="join-submit-btn auth-required-btn"
+                  onClick={() => setShowAuthModal(true)}
+                >
+                  <LogIn size={18} />
+                  <span>Sign In / Sign Up to Join</span>
+                </button>
+              )}
             </form>
 
             {/* Server Connection Status Bar */}

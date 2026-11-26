@@ -21,11 +21,20 @@ export function App() {
 
   const [currentUser, setCurrentUser] = useState(() => {
     let savedName: string | null = null;
+    let savedId: string | null = null;
     try {
-      savedName = localStorage.getItem('groupcall_user_name');
+      const stored = localStorage.getItem('calling_currentUser');
+      if (stored) {
+        const u = JSON.parse(stored);
+        if (u?.name) savedName = u.name;
+        if (u?.id) savedId = u.id;
+      }
+      if (!savedName) {
+        savedName = localStorage.getItem('groupcall_user_name');
+      }
     } catch {}
     return {
-      id: `web_user_${Math.floor(1000 + Math.random() * 9000)}`,
+      id: savedId || `web_user_${Math.floor(1000 + Math.random() * 9000)}`,
       name: savedName || 'Alex Johnson',
     };
   });

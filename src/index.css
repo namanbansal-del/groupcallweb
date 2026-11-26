@@ -4623,3 +4623,80 @@ body,
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+
+/* ── Auth Required Gate Box & Banner ─────────────────────────────────── */
+.auth-required-gate-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #EFF6FF;
+  border: 1px solid #BFDBFE;
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-top: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.auth-required-gate-box:hover {
+  background: #DBEAFE;
+  border-color: #93C5FD;
+}
+
+.auth-gate-icon-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.auth-gate-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.auth-gate-text strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1E3A8A;
+}
+
+.auth-gate-text span {
+  font-size: 11px;
+  color: #3B82F6;
+  line-height: 1.3;
+}
+
+.auth-gate-pill-btn {
+  background: #2563EB;
+  color: #FFFFFF;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+
+.auth-gate-pill-btn:hover {
+  background: #1D4ED8;
+}
+
+.join-submit-btn.auth-required-btn {
+  background: #2563EB;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+}
+
+.join-submit-btn.auth-required-btn:hover {
+  background: #1D4ED8;
+}
