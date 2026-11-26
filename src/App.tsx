@@ -116,7 +116,6 @@ export function App() {
         <ActiveCall call={call} />
       ) : (
         <Lobby
-          socket={socket}
           onJoin={handleJoin}
           defaultName={currentUser.name}
           defaultRoomId={defaultRoomId}
