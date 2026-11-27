@@ -208,7 +208,7 @@ export const ParticipantsDrawer: React.FC<ParticipantsDrawerProps> = ({
                             )}
                           </>
                         )}
-                        {p.isHost && <span className="tag-host">Host</span>}
+                        {p.isHost && <span className="tag-host">👑 Host</span>}
                       </div>
                       <div className="participant-row-status">
                         {p.isSpeaking && !p.isMuted ? (

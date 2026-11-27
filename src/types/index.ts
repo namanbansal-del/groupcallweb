@@ -22,8 +22,11 @@ export interface HostSettings {
   allowScreenShare: boolean;
   allowChat: boolean;
   allowUnmute: boolean;
+  allowMic?: boolean;
   allowCamera: boolean;
+  allowVideo?: boolean;
   requireApprovalToJoin: boolean;
+  waitingRoom?: boolean;
 }
 
 export interface KnockRequest {

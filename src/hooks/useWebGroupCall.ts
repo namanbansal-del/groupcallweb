@@ -2039,16 +2039,73 @@ export function useWebGroupCall({
 
   const onHostSettingsUpdate = useCallback(
     (payload: any = {}) => {
-      if (!payload?.settings) return;
+      const rawSettings = payload?.settings || payload || {};
+      const allowMic = typeof rawSettings.allowMic === 'boolean'
+        ? rawSettings.allowMic
+        : (typeof rawSettings.allowUnmute === 'boolean' ? rawSettings.allowUnmute : true);
+      const allowVideo = typeof rawSettings.allowVideo === 'boolean'
+        ? rawSettings.allowVideo
+        : (typeof rawSettings.allowCamera === 'boolean' ? rawSettings.allowCamera : true);
+      const allowScreenShare = typeof rawSettings.allowScreenShare === 'boolean'
+        ? rawSettings.allowScreenShare
+        : true;
+      const allowChat = typeof rawSettings.allowChat === 'boolean'
+        ? rawSettings.allowChat
+        : true;
+      const waitingRoom = typeof rawSettings.waitingRoom === 'boolean'
+        ? rawSettings.waitingRoom
+        : (typeof rawSettings.requireApprovalToJoin === 'boolean' ? rawSettings.requireApprovalToJoin : false);
+
+      const updated: HostSettings = {
+        allowScreenShare,
+        allowChat,
+        allowMic,
+        allowUnmute: allowMic,
+        allowVideo,
+        allowCamera: allowVideo,
+        waitingRoom,
+        requireApprovalToJoin: waitingRoom,
+      };
+
       setCallState((prev) => ({
         ...prev,
-        hostSettings: payload.settings,
+        hostSettings: updated,
       }));
-      if (!payload.settings.allowScreenShare && stateRef.current.isScreenSharing && !stateRef.current.isHost) {
+
+      // If host disabled mic permission, immediately disable participant's mic:
+      if (!allowMic && !stateRef.current.isHost) {
+        localStreamRef.current?.getAudioTracks().forEach((track) => (track.enabled = false));
+        setCallState((prev) => ({
+          ...prev,
+          isMuted: true,
+          localParticipant: { ...prev.localParticipant, isMuted: true },
+          hostNotification: 'The host has turned off microphones for participants.',
+        }));
+        if (socket?.connected) {
+          socket.emit('toggle-audio', { enabled: false, isMuted: true });
+        }
+      }
+
+      // If host disabled video permission, immediately turn off participant's camera:
+      if (!allowVideo && !stateRef.current.isHost) {
+        localStreamRef.current?.getVideoTracks().forEach((track) => (track.enabled = false));
+        setCallState((prev) => ({
+          ...prev,
+          isCameraOff: true,
+          localParticipant: { ...prev.localParticipant, isCameraOff: true },
+          hostNotification: 'The host has turned off cameras for participants.',
+        }));
+        if (socket?.connected) {
+          socket.emit('toggle-video', { enabled: false, isCameraOff: true });
+        }
+      }
+
+      // If host disabled screen share, immediately stop participant's screen share:
+      if (!allowScreenShare && stateRef.current.isScreenSharing && !stateRef.current.isHost) {
         toggleScreenShareRef.current();
       }
     },
-    []
+    [socket]
   );
 
   // ── Socket Room Listeners (Frontend Integration Guide Compliant) ─
@@ -2539,10 +2596,12 @@ export function useWebGroupCall({
     socket.on('room:denied', onDenied);
     socket.on('room:knock-request', onKnockRequest);
     // Host control events from signaling server
+    socket.on('force-mute', onHostMuteAll);
     socket.on('host:mute-user', onHostMuteUser);
     socket.on('host:mute-all', onHostMuteAll);
     socket.on('host:stop-screenshare', onHostStopScreenShare);
     socket.on('host-remove', onHostRemove);
+    socket.on('host-controls-updated', onHostSettingsUpdate);
     socket.on('peer:host-settings', onHostSettingsUpdate);
     socket.on('host:settings-update', onHostSettingsUpdate);
     socket.on('host-changed', onHostChanged);
@@ -2568,10 +2627,12 @@ export function useWebGroupCall({
       socket.off('room:admitted', onAdmitted);
       socket.off('room:denied', onDenied);
       socket.off('room:knock-request', onKnockRequest);
+      socket.off('force-mute', onHostMuteAll);
       socket.off('host:mute-user', onHostMuteUser);
       socket.off('host:mute-all', onHostMuteAll);
       socket.off('host:stop-screenshare', onHostStopScreenShare);
       socket.off('host-remove', onHostRemove);
+      socket.off('host-controls-updated', onHostSettingsUpdate);
       socket.off('peer:host-settings', onHostSettingsUpdate);
       socket.off('host:settings-update', onHostSettingsUpdate);
       socket.off('host-changed', onHostChanged);
@@ -2676,6 +2737,7 @@ export function useWebGroupCall({
 
   const hostMuteAll = useCallback(() => {
     broadcast({ type: 'host-mute-all', hostSocketId: socket?.id || currentUser.id });
+    socket?.emit('mute-all', { roomId: stateRef.current.roomId });
     socket?.emit('host:mute-all', { roomId: stateRef.current.roomId });
     setCallState((prev) => ({
       ...prev,
@@ -2721,15 +2783,39 @@ export function useWebGroupCall({
 
   const hostUpdateSettings = useCallback(
     (newSettings: Partial<HostSettings>) => {
+      const allowMic = typeof newSettings.allowMic === 'boolean'
+        ? newSettings.allowMic
+        : (typeof newSettings.allowUnmute === 'boolean' ? newSettings.allowUnmute : stateRef.current.hostSettings.allowUnmute);
+      const allowVideo = typeof newSettings.allowVideo === 'boolean'
+        ? newSettings.allowVideo
+        : (typeof newSettings.allowCamera === 'boolean' ? newSettings.allowCamera : stateRef.current.hostSettings.allowCamera);
+      const allowScreenShare = typeof newSettings.allowScreenShare === 'boolean'
+        ? newSettings.allowScreenShare
+        : stateRef.current.hostSettings.allowScreenShare;
+      const allowChat = typeof newSettings.allowChat === 'boolean'
+        ? newSettings.allowChat
+        : stateRef.current.hostSettings.allowChat;
+      const waitingRoom = typeof newSettings.waitingRoom === 'boolean'
+        ? newSettings.waitingRoom
+        : (typeof newSettings.requireApprovalToJoin === 'boolean' ? newSettings.requireApprovalToJoin : stateRef.current.hostSettings.requireApprovalToJoin);
+
       const updated: HostSettings = {
-        ...stateRef.current.hostSettings,
-        ...newSettings,
+        allowScreenShare,
+        allowChat,
+        allowMic,
+        allowUnmute: allowMic,
+        allowVideo,
+        allowCamera: allowVideo,
+        waitingRoom,
+        requireApprovalToJoin: waitingRoom,
       };
+
       setCallState((prev) => ({
         ...prev,
         hostSettings: updated,
       }));
       broadcast({ type: 'host-settings', settings: updated });
+      socket?.emit('update-host-controls', { settings: updated, roomId: stateRef.current.roomId });
       socket?.emit('host:settings-update', { settings: updated, roomId: stateRef.current.roomId });
     },
     [broadcast, socket]

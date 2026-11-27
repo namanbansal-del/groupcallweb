@@ -680,10 +680,10 @@ function registerSocketHandlers(namespace) {
       console.log(`[Host Control] Host ${socket.id} muted participant ${targetId} in '${roomCode}'`);
     });
 
-    // Host can mute everyone
-    socket.on('host:mute-all', (payload) => {
+    // Host can mute everyone (Supports both 'mute-all' and 'host:mute-all')
+    const handleMuteAll = (payload = {}) => {
       const { roomId } = payload || {};
-      const roomCode = roomId || (socketMeta.get(socket.id)?.roomCode);
+      const roomCode = (roomId || (socketMeta.get(socket.id)?.roomCode) || '').toUpperCase();
       if (!roomCode) return;
       const room = rooms.get(roomCode);
       if (!room) return;
@@ -695,7 +695,11 @@ function registerSocketHandlers(namespace) {
       }
 
       const muteAllPayload = { hostSocketId: socket.id, roomCode };
-      // Broadcast host:mute-all across namespaces
+      // Broadcast force-mute and host:mute-all across namespaces
+      namespace.to(roomCode).emit('force-mute', muteAllPayload);
+      io.of('/').to(roomCode).emit('force-mute', muteAllPayload);
+      io.of('/call').to(roomCode).emit('force-mute', muteAllPayload);
+
       namespace.to(roomCode).emit('host:mute-all', muteAllPayload);
       io.of('/').to(roomCode).emit('host:mute-all', muteAllPayload);
       io.of('/call').to(roomCode).emit('host:mute-all', muteAllPayload);
@@ -739,7 +743,10 @@ function registerSocketHandlers(namespace) {
         }
       }
       console.log(`[Host Control] Host ${socket.id} muted all participants in '${roomCode}'`);
-    });
+    };
+
+    socket.on('mute-all', handleMuteAll);
+    socket.on('host:mute-all', handleMuteAll);
 
     // Host can stop a participant's screen share
     socket.on('host:stop-screenshare', (payload) => {
@@ -787,17 +794,63 @@ function registerSocketHandlers(namespace) {
       }
     });
 
-    // Host can update meeting permissions
-    socket.on('host:settings-update', (payload) => {
+    // Host can update meeting permissions (Supports both 'update-host-controls' and 'host:settings-update')
+    const handleUpdateHostControls = (payload = {}) => {
       const { settings, roomId } = payload || {};
       const roomCode = (roomId || (socketMeta.get(socket.id)?.roomCode) || '').toUpperCase();
       if (!roomCode) return;
       const meta = roomMeta.get(roomCode);
-      if (meta && typeof settings?.requireApprovalToJoin === 'boolean') {
-        meta.requireApprovalToJoin = settings.requireApprovalToJoin;
+      const rawSettings = settings || payload || {};
+
+      const allowMic = typeof rawSettings.allowMic === 'boolean'
+        ? rawSettings.allowMic
+        : (typeof rawSettings.allowUnmute === 'boolean' ? rawSettings.allowUnmute : true);
+      const allowVideo = typeof rawSettings.allowVideo === 'boolean'
+        ? rawSettings.allowVideo
+        : (typeof rawSettings.allowCamera === 'boolean' ? rawSettings.allowCamera : true);
+      const allowScreenShare = typeof rawSettings.allowScreenShare === 'boolean'
+        ? rawSettings.allowScreenShare
+        : true;
+      const allowChat = typeof rawSettings.allowChat === 'boolean'
+        ? rawSettings.allowChat
+        : true;
+      const waitingRoom = typeof rawSettings.waitingRoom === 'boolean'
+        ? rawSettings.waitingRoom
+        : (typeof rawSettings.requireApprovalToJoin === 'boolean' ? rawSettings.requireApprovalToJoin : false);
+
+      const normalizedSettings = {
+        allowScreenShare,
+        allowChat,
+        allowMic,
+        allowUnmute: allowMic,
+        allowVideo,
+        allowCamera: allowVideo,
+        waitingRoom,
+        requireApprovalToJoin: waitingRoom,
+      };
+
+      if (meta) {
+        meta.requireApprovalToJoin = waitingRoom;
       }
-      socket.to(roomCode).emit('peer:host-settings', { settings });
-    });
+
+      // Broadcast across all namespaces and event aliases
+      namespace.to(roomCode).emit('host-controls-updated', { settings: normalizedSettings });
+      io.of('/').to(roomCode).emit('host-controls-updated', { settings: normalizedSettings });
+      io.of('/call').to(roomCode).emit('host-controls-updated', { settings: normalizedSettings });
+
+      namespace.to(roomCode).emit('peer:host-settings', { settings: normalizedSettings });
+      io.of('/').to(roomCode).emit('peer:host-settings', { settings: normalizedSettings });
+      io.of('/call').to(roomCode).emit('peer:host-settings', { settings: normalizedSettings });
+
+      namespace.to(roomCode).emit('host:settings-update', { settings: normalizedSettings });
+      io.of('/').to(roomCode).emit('host:settings-update', { settings: normalizedSettings });
+      io.of('/call').to(roomCode).emit('host:settings-update', { settings: normalizedSettings });
+      console.log(`[Host Control] Host ${socket.id} updated controls in '${roomCode}':`, normalizedSettings);
+    };
+
+    socket.on('update-host-controls', handleUpdateHostControls);
+    socket.on('host:settings-update', handleUpdateHostControls);
+    socket.on('peer:host-settings', handleUpdateHostControls);
 
     // Host admits a participant waiting in waiting room
     socket.on('host:admit-entry', (payload = {}) => {

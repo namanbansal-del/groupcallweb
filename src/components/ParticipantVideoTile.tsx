@@ -221,7 +221,7 @@ export const ParticipantVideoTile: React.FC<ParticipantVideoTileProps> = ({
             {name} {isLocal && '(You)'}
           </span>
         )}
-        {isHost && <span className="tag-host">Host</span>}
+        {isHost && <span className="tag-host">👑 Host</span>}
         {isMuted ? (
           <div className="mic-badge-muted" title="Muted">
             <MicOff size={13} color="#EF4444" />
